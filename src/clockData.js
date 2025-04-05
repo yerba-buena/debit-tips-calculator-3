@@ -3,7 +3,9 @@
 const fs = require('fs');
 const csvParser = require('csv-parser');
 const { parseDateTime, addMinutes } = require('./utils');
+const { Readable } = require('stream');
 
+// Reads CSV file without any pre-processing (not used for clock data)
 function readCSV(filePath) {
   return new Promise((resolve, reject) => {
     let results = [];
@@ -15,11 +17,38 @@ function readCSV(filePath) {
   });
 }
 
+/**
+ * loadClockData - Reads the raw clock times CSV, pre-processes it by:
+ *  - Skipping the first two rows (which contain time range info and extra header info)
+ *  - Removing the last row (totals)
+ * Then parses the cleaned CSV content.
+ */
 async function loadClockData(filePath) {
-  const data = await readCSV(filePath);
-  return data;
+  // Read entire file as text
+  const rawContent = fs.readFileSync(filePath, 'utf8');
+  // Split into lines
+  const lines = rawContent.split(/\r?\n/);
+  // Remove the first two rows and the last row (totals)
+  const cleanedLines = lines.slice(2, lines.length - 1);
+  // Join the cleaned lines back into a CSV string
+  const cleanedCSV = cleanedLines.join('\n');
+  
+  // Create a readable stream from the cleaned CSV string
+  return new Promise((resolve, reject) => {
+    let results = [];
+    Readable.from([cleanedCSV])
+      .pipe(csvParser())
+      .on('data', (data) => results.push(data))
+      .on('end', () => resolve(results))
+      .on('error', (err) => reject(err));
+  });
 }
 
+/**
+ * processClockData - Transforms the raw clock data into a cleaned format.
+ * Combines first and last names, parses clock in/out times, and fills missing
+ * clock-out times using 'Total Less Break' (assumed to be hours).
+ */
 function processClockData(clockData) {
   return clockData.map(row => {
     const employee = `${row['First Name']} ${row['Last Name']}`;
@@ -40,6 +69,10 @@ function processClockData(clockData) {
   });
 }
 
+/**
+ * expandToIntervals - Expands each shift into contiguous 15-minute intervals.
+ * Each interval is represented as a row with start and end times.
+ */
 function expandToIntervals(cleanedClock) {
   let intervals = [];
   cleanedClock.forEach(row => {
