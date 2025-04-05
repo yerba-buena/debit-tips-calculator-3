@@ -8,3 +8,4 @@ step5_individual_tip_shares.csv
 step6_unallocated_tips.csv
 step7_unallocated_tip_distribution.csv
 step8_final_employee_totals.csv
+package-lock.json
