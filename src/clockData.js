@@ -71,23 +71,25 @@ function processClockData(clockData) {
 
 /**
  * expandToIntervals - Expands each shift into contiguous 15-minute intervals.
- * Each interval is represented as a row with start and end times.
+ * Modified for fairness: if an employee clocks out partway through a 15-minute interval,
+ * they are still credited with the entire interval.
  */
 function expandToIntervals(cleanedClock) {
   let intervals = [];
   cleanedClock.forEach(row => {
     let slotStart = new Date(row.TimeIn);
+    // Continue generating intervals as long as slotStart is before the clock-out time.
+    // Even if the employee clocks out in the middle of an interval,
+    // we include that entire 15-minute block.
     while (slotStart < row.TimeOut) {
       let slotEnd = addMinutes(slotStart, 15);
-      if (slotEnd <= row.TimeOut) {
-        intervals.push({
-          Employee: row.Employee,
-          Department: row.Department,
-          Date: row.Date,
-          TimeSlotStart: new Date(slotStart),
-          TimeSlotEnd: new Date(slotEnd)
-        });
-      }
+      intervals.push({
+        Employee: row.Employee,
+        Department: row.Department,
+        Date: row.Date,
+        TimeSlotStart: new Date(slotStart),
+        TimeSlotEnd: new Date(slotEnd)
+      });
       slotStart = slotEnd;
     }
   });
