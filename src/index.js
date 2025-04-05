@@ -32,7 +32,8 @@ const args = minimist(process.argv.slice(2), {
   default: {
     clock: './input-data/clock-times.csv',
     transactions: './input-data/transactions.csv',
-    output: './output/'
+    output: './output/',
+    interval: '15'
   }
 });
 if (!args.clock || !args.transactions || !args.output) {
@@ -54,7 +55,8 @@ async function main() {
   console.log('Step 1: Processing clock data...');
   const rawClockData = await loadClockData(clockFile);
   const cleanedClock = processClockData(rawClockData);
-  const intervals = expandToIntervals(cleanedClock);
+  const intervalMinutes = parseInt(args.interval, 10);
+  const intervals = expandToIntervals(cleanedClock, intervalMinutes);
   await writeCSV(path.join(outputDir, 'step1_cleaned_clock_data.csv'),
     [
       { id: 'Employee', title: 'Employee' },

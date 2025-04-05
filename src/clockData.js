@@ -70,19 +70,36 @@ function processClockData(clockData) {
 }
 
 /**
- * expandToIntervals - Expands each shift into contiguous 15-minute intervals.
- * Modified for fairness: if an employee clocks out partway through a 15-minute interval,
+ * expandToIntervals - Expands each shift into contiguous time intervals.
+ * Accepts an optional interval parameter (in minutes) with a default of 15.
+ * For fairness: if an employee clocks out partway through an interval,
  * they are still credited with the entire interval.
+ *
+ * The interval must be between 2 and 60 minutes and evenly divide 1440.
+ * If invalid, defaults to 15 minutes.
  */
-function expandToIntervals(cleanedClock) {
+function expandToIntervals(cleanedClock, intervalMinutes = 15) {
+  // Validate the intervalMinutes parameter
+  if (
+    typeof intervalMinutes !== 'number' ||
+    intervalMinutes < 2 ||
+    intervalMinutes > 60 ||
+    1440 % intervalMinutes !== 0
+  ) {
+    console.warn(
+      `Invalid interval (${intervalMinutes} minutes). Falling back to default of 15 minutes.`
+    );
+    intervalMinutes = 15;
+  }
+  
   let intervals = [];
   cleanedClock.forEach(row => {
     let slotStart = new Date(row.TimeIn);
     // Continue generating intervals as long as slotStart is before the clock-out time.
     // Even if the employee clocks out in the middle of an interval,
-    // we include that entire 15-minute block.
+    // we include that entire block.
     while (slotStart < row.TimeOut) {
-      let slotEnd = addMinutes(slotStart, 15);
+      let slotEnd = addMinutes(slotStart, intervalMinutes);
       intervals.push({
         Employee: row.Employee,
         Department: row.Department,
