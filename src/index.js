@@ -29,6 +29,11 @@ function writeCSV(filePath, header, records) {
 const args = minimist(process.argv.slice(2), {
   string: ['clock', 'transactions', 'output'],
   alias: { c: 'clock', t: 'transactions', o: 'output' },
+  default: {
+    clock: './input-data/clock-times.csv',
+    transactions: './input-data/transactions.csv',
+    output: './output/'
+  }
 });
 if (!args.clock || !args.transactions || !args.output) {
   console.error('Usage: node src/index.js --clock <clock_data.csv> --transactions <transactions.csv> --output <output_directory>');
