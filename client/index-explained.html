@@ -3,7 +3,46 @@
 <head>
   <meta charset="UTF-8">
   <title>Tip Allocation Client</title>
-  <!-- Include PapaParse from CDN for CSV parsing and un-parsing -->
+  <!--
+    Tip Allocation Client - Overview
+
+    This client-side application processes employee clock times and transaction CSV data
+    to allocate debit tips fairly among employees. The process consists of the following steps:
+
+      1. File Input & Preprocessing:
+         - User selects a raw Clock Times CSV file and a Transactions CSV file.
+         - The Clock Times CSV is preprocessed to skip the first two rows (metadata and extra header info)
+           and remove the last row (totals).
+
+      2. Clock Data Processing:
+         - Parse the preprocessed CSV data to extract employee information (name, department, clock in/out times).
+         - If a clock-out time is missing, it is computed using the provided "Total Less Break" hours.
+         - Shifts are expanded into contiguous time intervals (default 15 minutes, configurable).
+           If an employee clocks out mid-interval, they are still credited for the full interval.
+
+      3. Transaction Data Processing:
+         - The Transactions CSV is parsed, and only approved transactions are considered.
+         - Each transaction's timestamp is floored to the nearest 15-minute interval (or user-specified floor)
+           and aggregated by time slot.
+
+      4. Tip Pooling & Allocation:
+         - For each time slot, the number of Front of House (FOH) and Back of House (BOH) employees is counted.
+         - The total tip for the slot is split into two pools: 85% for FOH and 15% for BOH.
+         - Each employee present in a slot receives an equal share of the appropriate pool.
+
+      5. Handling Unallocated Tips:
+         - Slots with no staff (or missing a department) leave part or all of the tip pool unallocated.
+         - Unallocated tips are redistributed evenly among all employees who worked that day.
+
+      6. Output & Downloads:
+         - The final aggregated tip totals per employee are displayed in a table.
+         - Additionally, intermediate CSV results (from each processing step) are generated and made available
+           as download links for further inspection.
+
+    This entire process is implemented using client-side JavaScript and PapaParse for CSV parsing,
+    allowing the application to run entirely in the browser without a server.
+  -->
+  <!-- Include PapaParse from CDN for CSV parsing -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
@@ -14,61 +53,49 @@
 </head>
 <body>
   <h1>Tip Allocation Pipeline</h1>
-  <p>
-    This tool processes your clock times and transactions CSV files to allocate tips fairly.
-    Specify the interval (in minutes, between 2 and 60, that evenly divides 1440) to create time chunks.
-  </p>
+  <p>Select your CSV files and set your time interval (between 2 and 60 minutes, must evenly divide 1440):</p>
   
-  <!-- File inputs for user to select the CSV files -->
+  <!-- File input for Clock Times CSV -->
   <label for="clockFile">Clock Times CSV:</label>
   <input type="file" id="clockFile" accept=".csv"><br><br>
   
+  <!-- File input for Transactions CSV -->
   <label for="transFile">Transactions CSV:</label>
   <input type="file" id="transFile" accept=".csv"><br><br>
   
-  <!-- Input to specify the time interval in minutes -->
+  <!-- Input for configurable time interval -->
   <label for="intervalInput">Interval (minutes):</label>
   <input type="number" id="intervalInput" value="15" min="2" max="60"><br><br>
   
-  <!-- Button to trigger processing -->
   <button id="processButton">Process Data</button>
   
-  <!-- Section for displaying final aggregated tip totals -->
   <h2>Final Aggregated Tip Totals</h2>
   <div id="output"></div>
   
-  <!-- Section for download links for all intermediate CSV outputs -->
   <h2>Download Intermediate CSV Files</h2>
   <div id="downloads"></div>
   
   <script>
-    /***********************
-     * Utility Functions
-     ***********************/
-    
-    // Parses a date string and a time string into a JavaScript Date object.
+    // --- Utility Functions ---
+    // Parses a date and time string into a Date object.
     function parseDateTime(dateStr, timeStr) {
       return new Date(dateStr + " " + timeStr);
     }
     
-    // Adds a specified number of minutes to a given Date.
+    // Adds a specified number of minutes to a date.
     function addMinutes(date, minutes) {
       return new Date(date.getTime() + minutes * 60000);
     }
     
-    // Floors a date to the nearest interval boundary.
-    // Example: For a 15-minute interval, 10:07 becomes 10:00.
+    // Floors a date to the nearest interval (default is 15 minutes).
     function floorToInterval(date, intervalMinutes = 15) {
       let minutes = date.getMinutes();
       let flooredMinutes = minutes - (minutes % intervalMinutes);
       return new Date(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours(), flooredMinutes, 0, 0);
     }
     
-    /***********************
-     * CSV Download Helper
-     ***********************/
-    
-    // Creates a download link for a CSV string and appends it to the downloads section.
+    // --- CSV Download Helper ---
+    // Creates a download link for a CSV string and appends it to the page.
     function downloadCSV(csvString, filename) {
       const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
@@ -78,30 +105,24 @@
       link.textContent = 'Download ' + filename;
       link.className = 'download-btn';
       document.getElementById("downloads").appendChild(link);
-      // Add a line break after each link
       document.getElementById("downloads").appendChild(document.createElement("br"));
     }
     
-    /***********************
-     * Clock Data Processing
-     ***********************/
-    
-    // Preprocess the raw clock CSV content.
-    // The raw file has two header lines (time range info) at the top and a totals row at the bottom.
-    // This function removes those rows so that the remaining content can be parsed correctly.
+    // --- Clock Data Processing ---
+    // Preprocesses the raw clock CSV content by skipping the first two rows and removing the last row (totals).
     function preprocessClockCSV(content) {
       const lines = content.split(/\r?\n/);
       const cleanedLines = lines.slice(2, lines.length - 1);
       return cleanedLines.join("\n");
     }
     
-    // Processes parsed clock CSV data into a structured array.
-    // Combines first and last name, parses clock-in and clock-out times, and fills missing clock-outs using 'Total Less Break'.
+    // Processes raw clock data (as parsed CSV rows) into a structured format with proper Date objects.
     function processClockData(clockData) {
       return clockData.map(row => {
         const employee = row["First Name"] + " " + row["Last Name"];
         const timeIn = parseDateTime(row["Date In"], row["Time In"]);
         let timeOut = row["Time Out"] ? parseDateTime(row["Date Out"], row["Time Out"]) : null;
+        // If clock-out is missing, compute it using "Total Less Break" hours.
         if (!timeOut && row["Total Less Break"]) {
           const hours = parseFloat(row["Total Less Break"]);
           timeOut = addMinutes(timeIn, hours * 60);
@@ -117,11 +138,10 @@
       });
     }
     
-    // Expands each employee's shift into contiguous time intervals.
-    // Even if an employee clocks out partway through an interval, they are credited with the full interval.
-    // The interval is configurable (default is 15 minutes).
+    // Expands each shift into contiguous time intervals of the given interval (in minutes).
+    // If an employee clocks out in the middle of an interval, they are still credited for the full interval.
     function expandToIntervals(cleanedClock, intervalMinutes = 15) {
-      // Validate the interval: must be between 2 and 60 and evenly divide 1440 minutes.
+      // Validate the interval: it must be numeric, between 2 and 60, and evenly divide 1440.
       if (
         typeof intervalMinutes !== "number" ||
         intervalMinutes < 2 ||
@@ -134,7 +154,7 @@
       let intervals = [];
       cleanedClock.forEach(row => {
         let slotStart = new Date(row.TimeIn);
-        // Create intervals until the employee's clock-out time is reached.
+        // Continue creating intervals until reaching the clock-out time.
         while (slotStart < row.TimeOut) {
           let slotEnd = addMinutes(slotStart, intervalMinutes);
           intervals.push({
@@ -150,18 +170,14 @@
       return intervals;
     }
     
-    /***********************
-     * Transactions Processing
-     ***********************/
-    
-    // Processes transactions CSV data.
-    // Filters for approved transactions, rounds each transaction time down to the nearest 15-minute interval,
-    // and groups transactions by date and interval to sum up tips.
+    // --- Transactions Processing ---
+    // Processes the transactions CSV data to include only approved transactions.
+    // Each transaction is floored to the nearest 15-minute interval and grouped by that time slot.
     function processTransactions(transactions) {
       let approved = transactions.filter(r => r.Approved && r.Approved.toLowerCase() === "yes")
         .map(r => {
           const transDT = new Date(r.TransDateTime);
-          const floored = floorToInterval(transDT, 15); // Floors to nearest 15-minute interval
+          const floored = floorToInterval(transDT, 15); // Floor to 15 minutes
           const dateStr = floored.toISOString().split("T")[0];
           return {
             TransDateTime: transDT,
@@ -171,7 +187,6 @@
           };
         });
       
-      // Group transactions by (Date, TimeSlotStart) key and sum AmtTip.
       let map = {};
       approved.forEach(txn => {
         const key = txn.Date + "|" + txn.TimeSlotStart.toISOString();
@@ -183,11 +198,8 @@
       return Object.values(map);
     }
     
-    /***********************
-     * Tip Allocation Logic
-     ***********************/
-    
-    // Counts the number of employees (by department) present in each interval.
+    // --- Tip Allocation Logic ---
+    // Counts the number of FOH and BOH employees present in each time slot.
     function countStaffPerSlot(intervals) {
       let map = {};
       intervals.forEach(rec => {
@@ -202,8 +214,7 @@
       return map;
     }
     
-    // Computes tip pools for each interval based on transaction tips.
-    // FOH gets 85% of the tip and BOH gets 15%.
+    // Computes tip pools for each time slot: 85% for FOH and 15% for BOH.
     function computeTipPools(tipsBySlot, staffMap) {
       return tipsBySlot.map(slot => {
         const key = slot.Date + "|" + slot.TimeSlotStart.toISOString();
@@ -221,8 +232,7 @@
       });
     }
     
-    // Calculates each employee's tip share for each interval.
-    // It divides the appropriate department's tip pool by the number of staff in that department.
+    // Calculates the individual tip share for each interval based on the appropriate tip pool.
     function calculateIndividualTipShares(intervals, tipPools) {
       let poolMap = {};
       tipPools.forEach(pool => {
@@ -253,7 +263,7 @@
       return shares;
     }
     
-    // Identifies intervals with unallocated tips (due to missing staff in a department).
+    // Identifies unallocated tips from time slots that had no staff or incomplete coverage.
     function identifyUnallocatedTips(tipPools) {
       let unallocated = [];
       tipPools.forEach(r => {
@@ -269,7 +279,7 @@
       return unallocated;
     }
     
-    // Redistributes unallocated tips evenly among all employees working that day.
+    // Redistributes unallocated tips evenly among all employees present on the same day.
     function redistributeUnallocatedTips(unallocatedTips, intervals) {
       let unallocByDay = {};
       unallocatedTips.forEach(rec => {
@@ -293,7 +303,7 @@
       return redistribution;
     }
     
-    // Aggregates the final tip totals per employee by summing direct tip shares and redistributed amounts.
+    // Aggregates the final tip totals per employee by summing their direct shares and redistributed amounts.
     function aggregateFinalTips(individualTipShares, redistribution) {
       let tipByEmployee = {};
       individualTipShares.forEach(rec => {
@@ -311,11 +321,8 @@
       return finalTotals;
     }
     
-    /***********************
-     * File Reading Helper
-     ***********************/
-    
-    // Reads a file (from an input element) and returns its text content.
+    // --- File Reading Helper ---
+    // Reads the content of an uploaded file and returns it as text.
     function readFileContent(file) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -325,20 +332,9 @@
       });
     }
     
-    /***********************
-     * Processing Pipeline Trigger
-     ***********************/
-    
-    // When the "Process Data" button is clicked, run the entire pipeline:
-    // 1. Read and preprocess the clock times CSV.
-    // 2. Parse and process clock data.
-    // 3. Expand shifts into time intervals based on the specified interval.
-    // 4. Process transactions CSV.
-    // 5. Compute tip pools, calculate individual tip shares, identify unallocated tips, redistribute them.
-    // 6. Aggregate final tip totals and display them.
-    // 7. For each step, generate and offer a download link for the intermediate CSV.
+    // --- Processing Pipeline Trigger ---
     document.getElementById("processButton").addEventListener("click", async () => {
-      // Clear any previous downloads and output.
+      // Clear previous downloads and output.
       document.getElementById("downloads").innerHTML = "";
       document.getElementById("output").innerHTML = "";
   
@@ -354,14 +350,13 @@
       try {
         // --- Step 1: Process Clock Data ---
         let clockContent = await readFileContent(clockFile);
-        // Preprocess: skip first two lines and remove the last line (totals)
+        // Preprocess raw clock CSV: skip first two lines and remove last line (totals)
         clockContent = preprocessClockCSV(clockContent);
-        // Parse CSV using PapaParse (with header row)
+        // Parse the CSV using PapaParse (headers expected on first line now)
         const clockData = Papa.parse(clockContent, { header: true }).data;
-        // Process raw clock data into structured format
         const cleanedClock = processClockData(clockData);
   
-        // Generate and download cleaned clock data CSV for inspection
+        // Generate CSV for cleaned clock data and create a download link.
         const cleanedCSV = Papa.unparse(cleanedClock.map(r => ({
           Employee: r.Employee,
           Department: r.Department,
