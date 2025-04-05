@@ -22,6 +22,9 @@
     "employee",
     "transactions"
   ],
+  "scripts": {
+    "test": "mocha tests"
+  },
   "author": "Your Name",
   "license": "MIT"
 }
