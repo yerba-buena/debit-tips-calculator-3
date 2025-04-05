@@ -1,0 +1,10 @@
+.DS_Store
+/node_modules
+step1_cleaned_clock_data.csv
+step2_time_intervals.csv
+step3_tips_by_slot.csv
+step4_tip_pools.csv
+step5_individual_tip_shares.csv
+step6_unallocated_tips.csv
+step7_unallocated_tip_distribution.csv
+step8_final_employee_totals.csv
