@@ -1,0 +1,2 @@
+One way of making sure that this code stays working even through further improvements, is to break down into more functions and modules with clean separation of concerns. Then front end code and back end code can share a complete testable snippets. Let’s do that with the note script, then proceed to do it for the in browser version.
+
