@@ -80,9 +80,17 @@ function processClockData(clockData) {
 
 // Returns an array of employees whose shifts overlap a given interval.
 function getEmployeesForInterval(interval, employees) {
-  return employees.filter(emp => {
-    return emp.TimeIn < interval.TimeSlotEnd && emp.TimeOut > interval.TimeSlotStart;
+  const unique = new Map();
+  employees.forEach(emp => {
+    // Check if the employee's shift overlaps the interval.
+    if (emp.TimeIn < interval.TimeSlotEnd && emp.TimeOut > interval.TimeSlotStart) {
+      // Only add the employee if not already present.
+      if (!unique.has(emp.Employee)) {
+        unique.set(emp.Employee, emp);
+      }
+    }
   });
+  return Array.from(unique.values());
 }
 
 // ----- Transaction Processing -----
