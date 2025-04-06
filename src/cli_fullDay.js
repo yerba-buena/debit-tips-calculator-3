@@ -2,14 +2,17 @@
 //
 // This script reads clock data and transaction CSVs,
 // chunks the entire day (midnight to midnight) into intervals (default 15 minutes),
-// assigns transactions to those intervals (by flooring relative to midnight),
-// and then determines which employees were present during each interval
-// (an employee is counted as present if any part of their shift overlaps the interval).
+// assigns transactions to those intervals (flooring relative to midnight),
+// and then determines which employees were on duty (whose shifts overlap the interval).
 //
-// Tip pools are computed per interval (85% to FOH, 15% to BOH), then divided equally among present employees.
-// Any unallocated tips (from intervals with no staff in a department) are redistributed evenly among all employees for that day.
-// Finally, the script prints out final aggregated tip totals per employee.
-// Run using: node cli_fullDay.js --clock ./input-data/clock-times.csv --transactions ./input-data/transactions.csv --interval 15
+// For each interval, tips are split into two pools (85% FOH, 15% BOH) and allocated equally among
+// the employees present in that department. Any unallocated tips (from intervals missing staff)
+// are then redistributed evenly among all employees working that day.
+// Finally, the script performs a sanity check to ensure the sum of final allocations equals the total tips
+// and outputs a final CSV file of aggregated tip totals per employee.
+//
+// Usage:
+//   node cli_fullDay.js --clock ./input-data/clock-times.csv --transactions ./input-data/transactions.csv --output ./output/ --interval 15
 
 const fs = require("fs");
 const path = require("path");
@@ -47,7 +50,7 @@ function generateDayIntervals(dateStr, intervalMinutes = 15) {
 }
 
 // ----- Clock Data Processing -----
-// Preprocess raw clock CSV: skip first two lines and remove the last line (totals)
+// Preprocess raw clock CSV: skip first two lines and remove the last row (totals)
 function preprocessClockCSV(content) {
   const lines = content.split(/\r?\n/);
   const cleanedLines = lines.slice(2, lines.length - 1);
@@ -75,11 +78,9 @@ function processClockData(clockData) {
   });
 }
 
-// For a given interval (with start and end) and a list of employee shifts,
-// return an array of employees who were present (if their shift overlaps the interval).
+// Returns an array of employees whose shifts overlap a given interval.
 function getEmployeesForInterval(interval, employees) {
   return employees.filter(emp => {
-    // Employee is considered present if any part of their shift overlaps the interval.
     return emp.TimeIn < interval.TimeSlotEnd && emp.TimeOut > interval.TimeSlotStart;
   });
 }
@@ -112,7 +113,7 @@ function processTransactions(transactions, intervalMinutes = 15) {
 }
 
 // ----- Tip Allocation -----
-// For each day interval, compute tip pools and allocate tips to employees present.
+// For each day interval, determine which employees were on shift, and allocate tips.
 function allocateTipsForDay(dayIntervals, transactionsByInterval, employees, intervalMinutes = 15) {
   // Map transactions by interval key.
   let transMap = {};
@@ -121,25 +122,20 @@ function allocateTipsForDay(dayIntervals, transactionsByInterval, employees, int
     transMap[key] = txn.AmtTip;
   });
   
-  // For each day interval, determine employees present and calculate individual shares.
+  // For each day interval, get employees on shift.
   const allocations = [];
-  // Unallocated pool will hold any amounts where one department has no employees.
-  let unallocatedByInterval = [];
+  const unallocatedByInterval = [];
   
   dayIntervals.forEach(interval => {
     const key = interval.Date + "|" + interval.TimeSlotStart.toISOString();
     const amtTip = transMap[key] || 0;
-    // Tip pools: FOH gets 85%, BOH gets 15%.
     const fohtipPool = amtTip * 0.85;
     const bohtipPool = amtTip * 0.15;
     
-    // Get employees present in this interval.
     const present = getEmployeesForInterval(interval, employees);
-    // Split into FOH and BOH.
     const fohPresent = present.filter(emp => emp.Department.toLowerCase().includes("front"));
     const bohPresent = present.filter(emp => emp.Department.toLowerCase().includes("back"));
     
-    // Compute allocation for each employee present in this interval.
     if (fohPresent.length > 0) {
       const share = fohtipPool / fohPresent.length;
       fohPresent.forEach(emp => {
@@ -150,7 +146,6 @@ function allocateTipsForDay(dayIntervals, transactionsByInterval, employees, int
         });
       });
     } else {
-      // No FOH present: FOH pool remains unallocated.
       unallocatedByInterval.push({ Date: interval.Date, UnallocatedTip: fohtipPool });
     }
     
@@ -171,16 +166,14 @@ function allocateTipsForDay(dayIntervals, transactionsByInterval, employees, int
   return { allocations, unallocatedByInterval };
 }
 
-// Redistribute unallocated tips per day evenly among all employees who worked that day.
+// Redistribute unallocated tips evenly among all employees for that day.
 function redistributeUnallocatedTips(unallocatedByInterval, employees) {
-  // Sum unallocated tips per day.
   const sumByDay = {};
   unallocatedByInterval.forEach(item => {
     if (!sumByDay[item.Date]) sumByDay[item.Date] = 0;
     sumByDay[item.Date] += item.UnallocatedTip;
   });
   
-  // Determine employees present per day.
   const employeesByDay = {};
   employees.forEach(emp => {
     if (!employeesByDay[emp.Date]) employeesByDay[emp.Date] = new Set();
@@ -199,7 +192,7 @@ function redistributeUnallocatedTips(unallocatedByInterval, employees) {
   return redistribution;
 }
 
-// Aggregate allocations (direct + redistributed) per employee.
+// Aggregates final tip totals per employee.
 function aggregateFinalTotals(allocations, redistribution) {
   const totals = {};
   allocations.forEach(rec => {
@@ -218,7 +211,6 @@ function aggregateFinalTotals(allocations, redistribution) {
 }
 
 // ----- Main Script -----
-// Parse command line arguments.
 const args = minimist(process.argv.slice(2), {
   string: ["clock", "transactions", "output", "interval"],
   alias: { c: "clock", t: "transactions", o: "output", i: "interval" },
@@ -229,7 +221,6 @@ const args = minimist(process.argv.slice(2), {
     interval: "15"
   }
 });
-
 const intervalMinutes = parseInt(args.interval, 10);
 
 // Read CSV files.
@@ -251,21 +242,51 @@ distinctDates.forEach(dateStr => {
   fullDayIntervals = fullDayIntervals.concat(intervals);
 });
 
-// Process transactions; now we floor relative to midnight.
+// Process transactions (flooring relative to midnight).
 const transactionsData = Papa.parse(rawTransactions, { header: true }).data;
 const transactionsByInterval = processTransactions(transactionsData, intervalMinutes);
 
-// For each day interval, we need to know which employees were working.
-const allocationsPerInterval = allocateTipsForDay(fullDayIntervals, transactionsByInterval, cleanedClock, intervalMinutes);
+// For each day interval, determine which employees were present and allocate tips.
+const { allocations, unallocatedByInterval } = allocateTipsForDay(fullDayIntervals, transactionsByInterval, cleanedClock, intervalMinutes);
 
-// Redistribute any unallocated tips across all employees for that day.
-const redistribution = redistributeUnallocatedTips(allocationsPerInterval.unallocatedByInterval, cleanedClock);
+// Redistribute unallocated tips.
+const redistribution = redistributeUnallocatedTips(unallocatedByInterval, cleanedClock);
 
-// Aggregate final totals.
-const finalTotals = aggregateFinalTotals(allocationsPerInterval.allocations, redistribution);
+// Aggregate final tip totals.
+const finalTotals = aggregateFinalTotals(allocations, redistribution);
 
-// Output final results.
+// ----- Sanity Checks -----
+// Compute total tip amount from transactions.
+const txnTotal = transactionsByInterval.reduce((sum, txn) => sum + txn.AmtTip, 0);
+// Compute final allocated tip sum.
+const finalAllocated = finalTotals.reduce((sum, rec) => sum + rec.TotalTips, 0);
+const tolerance = 0.01;
+if (Math.abs(finalAllocated - txnTotal) < tolerance) {
+  console.log("Sanity Check Passed: Final allocated tips match total transaction tips.");
+} else {
+  console.error("Sanity Check FAILED: Final allocated tips do not match total transaction tips.");
+  console.error(`Total Transaction Tips: $${txnTotal.toFixed(2)}, Final Allocated: $${finalAllocated.toFixed(2)}`);
+}
+
+// ----- Output Final CSV -----
+// Generate CSV string for final totals.
+const finalCSV = Papa.unparse(finalTotals.map(r => ({
+  Employee: r.Employee,
+  TotalTips: r.TotalTips.toFixed(2)
+})));
+
+// Ensure output directory exists.
+const outputDir = path.resolve(args.output);
+if (!fs.existsSync(outputDir)) {
+  fs.mkdirSync(outputDir, { recursive: true });
+}
+
+// Write final CSV file.
+const finalCSVPath = path.join(outputDir, "final_employee_totals.csv");
+fs.writeFileSync(finalCSVPath, finalCSV, "utf8");
+
 console.log("Final Aggregated Tip Totals:");
 finalTotals.forEach(row => {
   console.log(`${row.Employee}: $${row.TotalTips.toFixed(2)}`);
 });
+console.log(`Final CSV written to: ${finalCSVPath}`);
