@@ -12,4 +12,4 @@ package-lock.json
 input-data/clock-times-fixed.csv
 input-data/clock-times.csv
 input-data/transactions.csv
-output/final_employee_totals.csv
+output/*
