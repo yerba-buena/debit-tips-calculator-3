@@ -2,16 +2,24 @@
 //
 // This script implements a new tip allocation logic that encourages teamwork.
 // It splits each day (midnight to midnight) into fixed intervals (e.g., 15 minutes),
-// assigns transactions to those intervals, and separately determines which employees
-// (from clock data) were on duty during each interval. Each interval’s tip pools are computed:
-//   - Total Tips from transactions,
-//   - FOH Tip Pool: 85% of total,
-//   - BOH Tip Pool: 15% of total.
+// assigns transactions to those intervals, and processes clock data to determine which employees
+// were on duty in each interval (ensuring each employee is counted only once per interval).
 //
-// For each interval, the script allocates the tip pools evenly among the unique employees
-// present in each category. If an interval lacks FOH or BOH employees, the orphaned tip pool
-// is recorded. Then, for each day, all orphaned tips are combined and redistributed evenly among
-// all on‑duty employees for that day. The final aggregated tip totals per employee are output to a CSV.
+// The script then:
+// 1. Generates an interval tip summary from the transaction log,
+//    which includes total tips and the FOH (85%) and BOH (15%) tip pools per interval.
+// 2. Processes clock data to generate, for each interval, the unique list of employees present.
+// 3. Allocates the tip pools to the present employees; if one department is missing,
+//    the orphaned tips are combined per day and redistributed evenly among all on‑duty staff.
+// 4. Aggregates final tip totals per employee.
+// 5. Computes daily summaries including:
+//    - Total transaction tips per day,
+//    - FOH and BOH splits per day,
+//    - Hours worked per employee per day,
+//    - Tip allocation per employee per day.
+// 6. Logs the overall date ranges from both clock and transaction data (and throws an error if they don’t match).
+// 7. Performs a sanity check (failing with an error if totals don’t match).
+// 8. Writes CSV files for every step for inspection and prints final overall totals.
 //
 // Usage:
 //   node cli_newVersion.js --clock ./input-data/clock-times.csv --transactions ./input-data/transactions.csv --output ./output/ --interval 15
@@ -52,14 +60,14 @@ function generateDayIntervals(dateStr, intervalMinutes = 15) {
 }
 
 // ---------------- Clock Data Processing ----------------
-// Preprocesses the raw clock CSV by skipping the first two rows and removing the last row (totals).
+// Preprocess raw clock CSV: skip first two rows and remove the last row (totals)
 function preprocessClockCSV(content) {
   const lines = content.split(/\r?\n/);
   const cleanedLines = lines.slice(2, lines.length - 1);
   return cleanedLines.join("\n");
 }
 
-// Processes clock CSV rows into structured employee shift objects.
+// Process clock data rows into structured objects.
 function processClockData(clockData) {
   return clockData.map(row => {
     const employee = row["First Name"] + " " + row["Last Name"];
@@ -95,7 +103,7 @@ function getEmployeesForInterval(interval, employees) {
 }
 
 // ---------------- Transaction Processing ----------------
-// Processes transactions CSV and aggregates AmtTip per day interval (flooring transaction time relative to midnight).
+// Process transactions CSV and aggregate AmtTip per day interval (flooring relative to midnight).
 function processTransactions(transactions, intervalMinutes = 15) {
   let approved = transactions.filter(r => r.Approved && r.Approved.toLowerCase() === "yes")
     .map(r => {
@@ -121,16 +129,69 @@ function processTransactions(transactions, intervalMinutes = 15) {
   return Object.values(map);
 }
 
+// ---------------- Daily Range & Summary Calculations ----------------
+
+// Computes the date range (min and max date) from an array of objects with a Date property.
+function computeDateRange(data) {
+  const dates = data.map(d => new Date(d.Date));
+  const minDate = new Date(Math.min(...dates));
+  const maxDate = new Date(Math.max(...dates));
+  return { min: minDate, max: maxDate };
+}
+
+// Aggregates daily transaction summaries from interval tip summaries.
+function aggregateDailyTransactionSummary(intervalTipSummary) {
+  const daily = {};
+  intervalTipSummary.forEach(item => {
+    if (!daily[item.Date]) {
+      daily[item.Date] = { TotalTips: 0, FOHTipPool: 0, BOHTipPool: 0 };
+    }
+    daily[item.Date].TotalTips += item.TotalTips;
+    daily[item.Date].FOHTipPool += item.FOHTipPool;
+    daily[item.Date].BOHTipPool += item.BOHTipPool;
+  });
+  const summary = [];
+  for (let date in daily) {
+    summary.push({ Date: date, ...daily[date] });
+  }
+  return summary;
+}
+
+// Aggregates total hours worked per employee per day from clock data.
+function aggregateDailyEmployeeHours(clockData) {
+  const hoursByEmployee = {};
+  clockData.forEach(rec => {
+    const duration = (rec.TimeOut - rec.TimeIn) / (1000 * 3600); // in hours
+    const key = rec.Employee + "|" + rec.Date;
+    if (!hoursByEmployee[key]) {
+      hoursByEmployee[key] = { Employee: rec.Employee, Date: rec.Date, HoursWorked: 0 };
+    }
+    hoursByEmployee[key].HoursWorked += duration;
+  });
+  return Object.values(hoursByEmployee);
+}
+
+// Aggregates daily tip allocations per employee (before overall aggregation).
+function aggregateDailyEmployeeTips(allocations, redistribution) {
+  const dailyAlloc = {};
+  allocations.concat(redistribution).forEach(rec => {
+    const key = rec.Employee + "|" + rec.Date;
+    if (!dailyAlloc[key]) {
+      dailyAlloc[key] = { Employee: rec.Employee, Date: rec.Date, TipTotal: 0 };
+    }
+    dailyAlloc[key].TipTotal += rec.TipShare;
+  });
+  return Object.values(dailyAlloc);
+}
+
 // ---------------- Step 1: Generate Interval Tip Summary ----------------
-// For each full-day interval, assign transaction tips (floored relative to midnight)
-// and compute the FOH (85%) and BOH (15%) tip pools.
+// For each full-day interval, assign transaction tips and compute FOH and BOH tip pools.
 function generateIntervalTipSummary(dayIntervals, transactionsByInterval) {
   let transMap = {};
   transactionsByInterval.forEach(txn => {
     const key = txn.Date + "|" + txn.TimeSlotStart.toISOString();
     transMap[key] = txn.AmtTip;
   });
-  
   return dayIntervals.map(interval => {
     const key = interval.Date + "|" + interval.TimeSlotStart.toISOString();
     const amtTip = transMap[key] || 0;
@@ -166,17 +227,15 @@ function generateIntervalEmployeePresence(dayIntervals, employees) {
 
 // ---------------- Step 3: Allocate Tips to Employees ----------------
 // For each interval, allocate the FOH and BOH tip pools evenly among present employees.
-// If one category is missing, the entire tip pool for that category becomes orphaned.
+// If one category is missing, the entire tip pool for that category is marked as orphaned.
 function allocateTips(intervalTipSummary, intervalPresence) {
   const allocations = [];
-  const orphaned = []; // To hold unallocated tips per interval
+  const orphaned = [];
   
   intervalTipSummary.forEach(summary => {
-    // Find matching presence record.
     const presence = intervalPresence.find(p => p.Date === summary.Date &&
       p.TimeSlotStart.getTime() === summary.TimeSlotStart.getTime());
     if (presence) {
-      // Allocate FOH pool.
       if (presence.FOHCount > 0) {
         const shareFOH = summary.FOHTipPool / presence.FOHCount;
         presence.FOHEmployees.forEach(emp => {
@@ -185,7 +244,6 @@ function allocateTips(intervalTipSummary, intervalPresence) {
       } else {
         orphaned.push({ Date: summary.Date, OrphanedTip: summary.FOHTipPool });
       }
-      // Allocate BOH pool.
       if (presence.BOHCount > 0) {
         const shareBOH = summary.BOHTipPool / presence.BOHCount;
         presence.BOHEmployees.forEach(emp => {
@@ -201,7 +259,7 @@ function allocateTips(intervalTipSummary, intervalPresence) {
 }
 
 // ---------------- Step 4: Redistribute Orphaned Tips ----------------
-// For each day, combine orphaned tips and redistribute them evenly among all on‑duty employees.
+// For each day, combine orphaned tips and redistribute evenly among all on‑duty employees.
 function redistributeOrphanedTips(orphaned, employees) {
   const sumByDay = {};
   orphaned.forEach(item => {
@@ -209,7 +267,6 @@ function redistributeOrphanedTips(orphaned, employees) {
     sumByDay[item.Date] += item.OrphanedTip;
   });
   
-  // Identify unique employees on duty per day from the clock data.
   const employeesByDay = {};
   employees.forEach(emp => {
     if (!employeesByDay[emp.Date]) employeesByDay[emp.Date] = new Set();
@@ -277,6 +334,10 @@ const preprocessedClock = preprocessClockCSV(rawClock);
 const clockDataParsed = Papa.parse(preprocessedClock, { header: true }).data;
 const cleanedClock = processClockData(clockDataParsed);
 
+// Compute date range for clock data.
+const clockRange = computeDateRange(cleanedClock);
+console.log(`Clock Data Date Range: ${clockRange.min.toISOString().split("T")[0]} to ${clockRange.max.toISOString().split("T")[0]}`);
+
 // ---------- Generate Full-Day Intervals ----------
 const distinctDates = [...new Set(cleanedClock.map(emp => emp.Date))];
 let fullDayIntervals = [];
@@ -288,6 +349,16 @@ distinctDates.forEach(dateStr => {
 // ---------- Process Transaction Data ----------
 const transactionsData = Papa.parse(rawTransactions, { header: true }).data;
 const transactionsByInterval = processTransactions(transactionsData, intervalMinutes);
+
+// Compute date range for transactions.
+const txnRange = computeDateRange(transactionsByInterval);
+console.log(`Transaction Data Date Range: ${txnRange.min.toISOString().split("T")[0]} to ${txnRange.max.toISOString().split("T")[0]}`);
+
+// Check that the date ranges match.
+if (txnRange.min.toISOString().split("T")[0] !== clockRange.min.toISOString().split("T")[0] ||
+    txnRange.max.toISOString().split("T")[0] !== clockRange.max.toISOString().split("T")[0]) {
+  throw new Error("Date range mismatch between clock data and transaction data.");
+}
 
 // ---------- Step 1: Generate Interval Tip Summary ----------
 const intervalTipSummary = generateIntervalTipSummary(fullDayIntervals, transactionsByInterval);
@@ -327,14 +398,36 @@ const finalTotals = aggregateFinalTotals(allocations, redistribution);
 const txnTotal = transactionsByInterval.reduce((sum, txn) => sum + txn.AmtTip, 0);
 const allocatedTotal = finalTotals.reduce((sum, rec) => sum + rec.TotalTips, 0);
 const tolerance = 0.01;
-if (Math.abs(allocatedTotal - txnTotal) < tolerance) {
-  console.log("Sanity Check Passed: Allocated totals match transaction totals.");
-} else {
-  console.error("Sanity Check FAILED: Discrepancy detected.");
-  console.error(`Transaction Total: $${txnTotal.toFixed(2)}, Allocated Total: $${allocatedTotal.toFixed(2)}`);
+if (Math.abs(allocatedTotal - txnTotal) >= tolerance) {
+  throw new Error(`Sanity Check FAILED: Transaction Total ($${txnTotal.toFixed(2)}) does not match Allocated Total ($${allocatedTotal.toFixed(2)})`);
 }
+console.log("Sanity Check Passed: Allocated totals match transaction totals.");
 
-// ---------- Output Final CSV ----------
+// ---------- Additional Daily Summaries ----------
+
+// Daily transaction summary: total tips, FOH and BOH split.
+const dailyTxnSummary = aggregateDailyTransactionSummary(intervalTipSummary);
+const dailyTxnCSV = generateCSV(dailyTxnSummary);
+const dailyTxnCSVPath = path.join(outputDir, "daily_transaction_summary.csv");
+fs.writeFileSync(dailyTxnCSVPath, dailyTxnCSV, "utf8");
+console.log(`Daily Transaction Summary CSV written to: ${dailyTxnCSVPath}`);
+
+// Daily employee hours: total hours worked per employee per day.
+const dailyEmployeeHours = aggregateDailyEmployeeHours(cleanedClock);
+const dailyEmployeeHoursCSV = generateCSV(dailyEmployeeHours);
+const dailyEmployeeHoursCSVPath = path.join(outputDir, "daily_employee_hours.csv");
+fs.writeFileSync(dailyEmployeeHoursCSVPath, dailyEmployeeHoursCSV, "utf8");
+console.log(`Daily Employee Hours CSV written to: ${dailyEmployeeHoursCSVPath}`);
+
+// Daily tip allocations per employee.
+const dailyEmployeeTips = aggregateDailyEmployeeTips(allocations, redistribution);
+const dailyEmployeeTipsCSV = generateCSV(dailyEmployeeTips);
+const dailyEmployeeTipsCSVPath = path.join(outputDir, "daily_employee_tip_allocation.csv");
+fs.writeFileSync(dailyEmployeeTipsCSVPath, dailyEmployeeTipsCSV, "utf8");
+console.log(`Daily Employee Tip Allocation CSV written to: ${dailyEmployeeTipsCSVPath}`);
+
+// ---------- Final Aggregated Totals ----------
+// Final overall allocation per employee.
 const finalTotalsCSV = generateCSV(finalTotals.map(r => ({
   Employee: r.Employee,
   TotalTips: r.TotalTips.toFixed(2)
@@ -343,6 +436,7 @@ const finalTotalsCSVPath = path.join(outputDir, "final_employee_totals.csv");
 fs.writeFileSync(finalTotalsCSVPath, finalTotalsCSV, "utf8");
 console.log(`Final Employee Totals CSV written to: ${finalTotalsCSVPath}`);
 
+// ---------- Print Final Totals to Terminal ----------
 console.log("Final Aggregated Tip Totals:");
 finalTotals.forEach(row => {
   console.log(`${row.Employee}: $${row.TotalTips.toFixed(2)}`);
