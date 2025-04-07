@@ -1,32 +1,20 @@
 // cli_newVersion.js
 //
 // This script implements an enhanced tip allocation pipeline that encourages teamwork.
-// It splits each day (midnight to midnight) into fixed intervals (default 15 minutes),
-// and then processes two separate datasets:
-// 1. Transaction Data: Transactions are floored to these intervals, aggregated,
-//    and then split into FOH (85%) and BOH (15%) tip pools. This creates an interval tip summary.
-// 2. Clock Data: The raw clock times (after cleaning extra header rows and totals) are processed
-//    to determine which employees were present during each interval (deduplicating employees with overlapping shifts).
+// It splits each day (midnight to midnight) into fixed intervals (default 15 minutes)
+// and then processes two datasets:
+// 1. Transaction Data: Transactions are floored to these intervals and aggregated,
+//    then split into FOH (85%) and BOH (15%) tip pools. The result is output to "interval_tip_summary.csv".
+// 2. Clock Data: The raw clock times CSV (after cleaning) is processed to determine which
+//    employees were on duty (each employee counted only once per interval). This is output to "interval_employee_presence.csv".
 //
-// Next, for each interval the tip pools are allocated evenly among the employees present in each department.
-// If one department is missing in an interval, that tip pool becomes orphaned.
-// Then, orphaned tips are aggregated per day and redistributed evenly among all on‑duty employees.
-// Additionally, daily summaries are computed that show:
-//  - Total transaction tips per day, with the FOH/BOH split and orphaned tip amounts.
-//  - Total hours worked per employee per day.
-//  - Daily tip allocations per employee.
-//
-// The script prints the overall date ranges from clock and transaction data (and throws an error if they don’t match).
-// It also performs a sanity check (throwing an error if the final allocated tip total does not match total transaction tips).
-//
-// Finally, several CSVs are written for inspection:
-//    • interval_tip_summary.csv
-//    • interval_employee_presence.csv
-//    • orphaned_tips.csv
-//    • daily_transaction_summary.csv (merged with orphaned tip data)
-//    • daily_employee_hours.csv
-//    • daily_employee_tip_allocation.csv
-//    • final_employee_totals.csv
+// For each interval, if one department is missing, the entire tip pool for that department is re‐assigned
+// to the other (if present). If both are missing, the tip becomes orphaned.
+// Then, orphaned tips for each day are summed and redistributed evenly among all employees on duty that day.
+// In addition, daily summaries are generated (total transaction tips per day, FOH/BOH splits, employee hours,
+// and daily tip allocations per employee). The script prints the overall date ranges for both datasets (and
+// throws an error if they do not match) and performs a sanity check (throwing an error if totals don’t match).
+// Final results are output as CSV files and printed to the terminal.
 //
 // Usage:
 //   node cli_newVersion.js --clock ./input-data/clock-times.csv --transactions ./input-data/transactions.csv --output ./output/ --interval 15
@@ -110,7 +98,7 @@ function getEmployeesForInterval(interval, employees) {
 }
 
 // ---------------- Transaction Processing ----------------
-// Processes transactions CSV and aggregates AmtTip per day interval (flooring relative to midnight).
+// Process transactions CSV and aggregate AmtTip per day interval (flooring relative to midnight).
 function processTransactions(transactions, intervalMinutes = 15) {
   let approved = transactions.filter(r => r.Approved && r.Approved.toLowerCase() === "yes")
     .map(r => {
@@ -138,7 +126,7 @@ function processTransactions(transactions, intervalMinutes = 15) {
 
 // ---------------- Daily Range & Summary Functions ----------------
 
-// Computes the date range (min and max) from data with a Date property.
+// Computes the date range (min and max) from an array of objects with a Date property.
 function computeDateRange(data) {
   const dates = data.map(d => new Date(d.Date));
   const minDate = new Date(Math.min(...dates));
@@ -164,28 +152,7 @@ function aggregateDailyTransactionSummary(intervalTipSummary) {
   return summary;
 }
 
-// Aggregates daily orphaned tips from orphaned items (by department).
-function aggregateDailyOrphanedTips(orphaned) {
-  const daily = {};
-  orphaned.forEach(item => {
-    if (!daily[item.Date]) {
-      daily[item.Date] = { FOHOrphaned: 0, BOHOrphaned: 0, TotalOrphaned: 0 };
-    }
-    if (item.Department === "FOH") {
-      daily[item.Date].FOHOrphaned += item.OrphanedTip;
-    } else if (item.Department === "BOH") {
-      daily[item.Date].BOHOrphaned += item.OrphanedTip;
-    }
-    daily[item.Date].TotalOrphaned += item.OrphanedTip;
-  });
-  const result = [];
-  for (let date in daily) {
-    result.push({ Date: date, ...daily[date] });
-  }
-  return result;
-}
-
-// Aggregates daily employee hours from clock data.
+// Aggregates daily employee hours worked from clock data.
 function aggregateDailyEmployeeHours(clockData) {
   const hoursByEmployee = {};
   clockData.forEach(rec => {
@@ -213,7 +180,7 @@ function aggregateDailyEmployeeTips(allocations, redistribution) {
 }
 
 // ---------------- Step 1: Generate Interval Tip Summary ----------------
-// For each full-day interval, assign transaction tips and compute FOH/BOH tip pools.
+// For each full-day interval, assign transaction tips and compute FOH and BOH tip pools.
 function generateIntervalTipSummary(dayIntervals, transactionsByInterval) {
   let transMap = {};
   transactionsByInterval.forEach(txn => {
@@ -254,8 +221,9 @@ function generateIntervalEmployeePresence(dayIntervals, employees) {
 }
 
 // ---------------- Step 3: Allocate Tips to Employees ----------------
-// For each interval, allocate the FOH and BOH tip pools evenly among present employees.
-// If one category is missing, record the orphaned tip pool with the department.
+// For each interval, allocate the tip pools to present employees.
+// If one department is missing, add that tip pool to the other (if present),
+// so that orphaned tips only occur if no employee is present at all.
 function allocateTips(intervalTipSummary, intervalPresence) {
   const allocations = [];
   const orphaned = [];
@@ -264,22 +232,39 @@ function allocateTips(intervalTipSummary, intervalPresence) {
     const presence = intervalPresence.find(p => p.Date === summary.Date &&
       p.TimeSlotStart.getTime() === summary.TimeSlotStart.getTime());
     if (presence) {
+      // Adjust tip pools: if one department is missing, add its pool to the other.
+      let effectiveFOHTipPool = summary.FOHTipPool;
+      let effectiveBOHTipPool = summary.BOHTipPool;
+      if (presence.FOHCount === 0 && presence.BOHCount > 0) {
+        effectiveBOHTipPool += effectiveFOHTipPool;
+        effectiveFOHTipPool = 0;
+      }
+      if (presence.BOHCount === 0 && presence.FOHCount > 0) {
+        effectiveFOHTipPool += effectiveBOHTipPool;
+        effectiveBOHTipPool = 0;
+      }
+      
       if (presence.FOHCount > 0) {
-        const shareFOH = summary.FOHTipPool / presence.FOHCount;
+        const shareFOH = effectiveFOHTipPool / presence.FOHCount;
         presence.FOHEmployees.forEach(emp => {
           allocations.push({ Employee: emp, Date: summary.Date, TipShare: shareFOH });
         });
-      } else {
-        orphaned.push({ Date: summary.Date, Department: "FOH", OrphanedTip: summary.FOHTipPool });
+      } else if (effectiveFOHTipPool > 0) {
+        // In case no FOH present, record orphaned tip (should be rare now).
+        orphaned.push({ Date: summary.Date, Department: "FOH", OrphanedTip: effectiveFOHTipPool });
       }
+      
       if (presence.BOHCount > 0) {
-        const shareBOH = summary.BOHTipPool / presence.BOHCount;
+        const shareBOH = effectiveBOHTipPool / presence.BOHCount;
         presence.BOHEmployees.forEach(emp => {
           allocations.push({ Employee: emp, Date: summary.Date, TipShare: shareBOH });
         });
-      } else {
-        orphaned.push({ Date: summary.Date, Department: "BOH", OrphanedTip: summary.BOHTipPool });
+      } else if (effectiveBOHTipPool > 0) {
+        orphaned.push({ Date: summary.Date, Department: "BOH", OrphanedTip: effectiveBOHTipPool });
       }
+    } else {
+      // No employees present for this interval; orphan entire tip.
+      orphaned.push({ Date: summary.Date, Department: "BOTH", OrphanedTip: summary.TotalTips });
     }
   });
   
@@ -287,7 +272,7 @@ function allocateTips(intervalTipSummary, intervalPresence) {
 }
 
 // ---------------- Step 4: Redistribute Orphaned Tips ----------------
-// For each day, combine orphaned tips (separately by department) and then redistribute the total evenly among all on‑duty employees.
+// For each day, combine all orphaned tips and redistribute them evenly among all on‑duty employees.
 function redistributeOrphanedTips(orphaned, employees) {
   const sumByDay = {};
   orphaned.forEach(item => {
@@ -314,7 +299,7 @@ function redistributeOrphanedTips(orphaned, employees) {
 }
 
 // ---------------- Step 5: Aggregate Final Totals ----------------
-// Sum allocations (direct and redistributed) per employee.
+// Sum allocations (direct plus redistributed) per employee.
 function aggregateFinalTotals(allocations, redistribution) {
   const totals = {};
   allocations.forEach(rec => {
@@ -378,7 +363,7 @@ const transactionsByInterval = processTransactions(transactionsData, intervalMin
 const txnRange = computeDateRange(transactionsByInterval);
 console.log(`Transaction Data Date Range: ${txnRange.min.toISOString().split("T")[0]} to ${txnRange.max.toISOString().split("T")[0]}`);
 
-// Verify date ranges match.
+// Verify that the clock and transaction date ranges match.
 if (txnRange.min.toISOString().split("T")[0] !== clockRange.min.toISOString().split("T")[0] ||
     txnRange.max.toISOString().split("T")[0] !== clockRange.max.toISOString().split("T")[0]) {
   throw new Error("Date range mismatch between clock data and transaction data.");
@@ -438,10 +423,9 @@ if (Math.abs(allocatedTotal - txnTotal) >= tolerance) {
 console.log("Sanity Check Passed: Allocated totals match transaction totals.");
 
 // ---------- Additional Daily Summaries ----------
-
-// Daily Transaction Summary (with orphaned tips merged).
+// Daily Transaction Summary (including orphaned tips).
 const dailyTxnSummary = aggregateDailyTransactionSummary(intervalTipSummary);
-const dailyOrphaned = aggregateDailyOrphanedTips(orphaned);
+const dailyOrphaned = orphaned.length ? aggregateDailyOrphanedTips(orphaned) : [];
 const dailyTxnWithOrphaned = dailyTxnSummary.map(item => {
   const orphanedItem = dailyOrphaned.find(o => o.Date === item.Date) || { TotalOrphaned: 0 };
   return { ...item, TotalOrphaned: orphanedItem.TotalOrphaned.toFixed(2) };

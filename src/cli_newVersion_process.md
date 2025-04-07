@@ -1,21 +1,19 @@
 Explanation
 	1.	Data Range Checks:
-– The script computes and logs the date ranges for clock data and transactions. It throws an error if they do not match.
-	2.	Interval Tip Summary (Step 1):
-– Full‑day intervals are generated and transactions are aggregated per interval. The resulting summary (with total tips, FOH tip pool, and BOH tip pool) is saved to “interval_tip_summary.csv.”
-	3.	Interval Employee Presence (Step 2):
-– For each interval, the unique list of employees (deduplicated by name) is determined, and counts (and names) for FOH and BOH are output to “interval_employee_presence.csv.”
-	4.	Tip Allocation (Step 3):
-– The tip pools for each interval are allocated evenly to present employees. If a department is missing, that pool is recorded as orphaned (with a “Department” field added).
-	5.	Orphaned Tips CSV (Step 4):
-– All orphaned tips (from missing FOH or BOH in an interval) are output to “orphaned_tips.csv” so a human can inspect the values.
-	6.	Redistribution (Step 5):
-– Orphaned tips are aggregated per day and redistributed evenly among all on‑duty employees.
-	7.	Aggregation and Daily Summaries:
-– Final totals per employee are computed.
-– Daily summaries are generated: the daily transaction summary now includes a column for total orphaned tips. Daily employee hours and daily tip allocations per employee are also computed and saved.
-	8.	Sanity Check & Final Output:
-– A sanity check ensures that the total allocated tips match the total transaction tips. If the check fails, an error is thrown.
-– The final overall employee totals are written to “final_employee_totals.csv” and printed to the terminal.
+The script computes and logs the date ranges for both clock data and transaction data. If they don’t match, an error is thrown.
+	2.	Interval Tip Summary:
+The day is split into intervals (midnight–midnight) and transactions are aggregated (after flooring relative to midnight) to produce an interval summary (with FOH and BOH pools). This summary is saved to “interval_tip_summary.csv”.
+	3.	Employee Presence:
+The clock data is cleaned and processed. For each interval, a deduplicated list of employees present (separately for FOH and BOH) is determined and written to “interval_employee_presence.csv”.
+	4.	Tip Allocation with Improved Logic:
+In each interval, if one department is missing, its tip pool is added to the other (if present). If both are missing, the tip becomes orphaned. The orphaned tips are recorded and then output to “orphaned_tips.csv”.
+	5.	Redistribution of Orphaned Tips:
+Orphaned tips for each day are aggregated and redistributed evenly among all on‑duty employees (from clock data).
+	6.	Daily Summaries:
+Daily summaries for transaction totals (with orphaned amounts), employee hours, and daily tip allocations are generated and saved as CSVs.
+	7.	Sanity Check:
+The script compares the total transaction tips with the total allocated tips. If the difference exceeds a small tolerance, an error is thrown.
+	8.	Final Totals:
+The final aggregated tip totals per employee are printed to the terminal and saved to “final_employee_totals.csv”.
 
-This enhanced version produces several CSVs at key steps—including a dedicated orphaned tips CSV—so that a human can manually inspect the orphaned tip logic and verify all calculations.
+This updated version ensures that no tips remain unapplied by reassigning orphaned tip pools when one department is absent and by redistributing any remaining orphaned amounts across all on‑duty employees. All steps are logged via CSV outputs for manual inspection.
