@@ -2,19 +2,20 @@
 //
 // This script implements an enhanced tip allocation pipeline that encourages teamwork.
 // It splits each day (midnight to midnight) into fixed intervals (default 15 minutes)
-// and then processes two datasets:
+// and processes two datasets:
 // 1. Transaction Data: Transactions are floored to these intervals and aggregated,
-//    then split into FOH (85%) and BOH (15%) tip pools. The result is output to "interval_tip_summary.csv".
-// 2. Clock Data: The raw clock times CSV (after cleaning) is processed to determine which
-//    employees were on duty (each employee counted only once per interval). This is output to "interval_employee_presence.csv".
+//    then split into tip pools (normally 85% FOH and 15% BOH).
+// 2. Clock Data: Raw clock times are processed to determine which employees were on duty
+//    in each interval (each employee is counted only once).
 //
-// For each interval, if one department is missing, the entire tip pool for that department is re‐assigned
-// to the other (if present). If both are missing, the tip becomes orphaned.
-// Then, orphaned tips for each day are summed and redistributed evenly among all employees on duty that day.
-// In addition, daily summaries are generated (total transaction tips per day, FOH/BOH splits, employee hours,
-// and daily tip allocations per employee). The script prints the overall date ranges for both datasets (and
-// throws an error if they do not match) and performs a sanity check (throwing an error if totals don’t match).
-// Final results are output as CSV files and printed to the terminal.
+// New fallback logic in Step 3:
+// - If both FOH and BOH are present, split as usual.
+// - If only one category is present, allocate the entire interval's tips (100%) to that group.
+// - If no one is present, the interval’s tips are orphaned.
+// Orphaned tips for each day are then redistributed evenly among all employees on duty that day.
+//
+// The script outputs CSVs for inspection at each step and performs a sanity check,
+// throwing an error if the final allocated total doesn’t match the total transaction tips.
 //
 // Usage:
 //   node cli_newVersion.js --clock ./input-data/clock-times.csv --transactions ./input-data/transactions.csv --output ./output/ --interval 15
@@ -55,7 +56,7 @@ function generateDayIntervals(dateStr, intervalMinutes = 15) {
 }
 
 // ---------------- Clock Data Processing ----------------
-// Preprocess raw clock CSV: skip the first two rows and remove the last row (totals).
+// Preprocess raw clock CSV: skip first two rows and remove the last row (totals).
 function preprocessClockCSV(content) {
   const lines = content.split(/\r?\n/);
   const cleanedLines = lines.slice(2, lines.length - 1);
@@ -87,7 +88,6 @@ function processClockData(clockData) {
 function getEmployeesForInterval(interval, employees) {
   const unique = new Map();
   employees.forEach(emp => {
-    // Employee is considered present if any part of their shift overlaps the interval.
     if (emp.TimeIn < interval.TimeSlotEnd && emp.TimeOut > interval.TimeSlotStart) {
       if (!unique.has(emp.Employee)) {
         unique.set(emp.Employee, emp);
@@ -126,7 +126,7 @@ function processTransactions(transactions, intervalMinutes = 15) {
 
 // ---------------- Daily Range & Summary Functions ----------------
 
-// Computes the date range (min and max) from an array of objects with a Date property.
+// Computes the date range (min and max) from data with a Date property.
 function computeDateRange(data) {
   const dates = data.map(d => new Date(d.Date));
   const minDate = new Date(Math.min(...dates));
@@ -222,8 +222,9 @@ function generateIntervalEmployeePresence(dayIntervals, employees) {
 
 // ---------------- Step 3: Allocate Tips to Employees ----------------
 // For each interval, allocate the tip pools to present employees.
-// If one department is missing, add that tip pool to the other (if present),
-// so that orphaned tips only occur if no employee is present at all.
+// New fallback logic:
+// - If both FOH and BOH are present, split as normal (85%/15%).
+// - If only one group is present, allocate 100% of the interval's tips to that group.
 function allocateTips(intervalTipSummary, intervalPresence) {
   const allocations = [];
   const orphaned = [];
@@ -232,38 +233,34 @@ function allocateTips(intervalTipSummary, intervalPresence) {
     const presence = intervalPresence.find(p => p.Date === summary.Date &&
       p.TimeSlotStart.getTime() === summary.TimeSlotStart.getTime());
     if (presence) {
-      // Adjust tip pools: if one department is missing, add its pool to the other.
-      let effectiveFOHTipPool = summary.FOHTipPool;
-      let effectiveBOHTipPool = summary.BOHTipPool;
-      if (presence.FOHCount === 0 && presence.BOHCount > 0) {
-        effectiveBOHTipPool += effectiveFOHTipPool;
-        effectiveFOHTipPool = 0;
-      }
-      if (presence.BOHCount === 0 && presence.FOHCount > 0) {
-        effectiveFOHTipPool += effectiveBOHTipPool;
-        effectiveBOHTipPool = 0;
-      }
-      
-      if (presence.FOHCount > 0) {
-        const shareFOH = effectiveFOHTipPool / presence.FOHCount;
+      if (presence.FOHCount > 0 && presence.BOHCount > 0) {
+        // Both groups present: use normal split.
+        const shareFOH = summary.FOHTipPool / presence.FOHCount;
         presence.FOHEmployees.forEach(emp => {
           allocations.push({ Employee: emp, Date: summary.Date, TipShare: shareFOH });
         });
-      } else if (effectiveFOHTipPool > 0) {
-        // In case no FOH present, record orphaned tip (should be rare now).
-        orphaned.push({ Date: summary.Date, Department: "FOH", OrphanedTip: effectiveFOHTipPool });
-      }
-      
-      if (presence.BOHCount > 0) {
-        const shareBOH = effectiveBOHTipPool / presence.BOHCount;
+        const shareBOH = summary.BOHTipPool / presence.BOHCount;
         presence.BOHEmployees.forEach(emp => {
           allocations.push({ Employee: emp, Date: summary.Date, TipShare: shareBOH });
         });
-      } else if (effectiveBOHTipPool > 0) {
-        orphaned.push({ Date: summary.Date, Department: "BOH", OrphanedTip: effectiveBOHTipPool });
+      } else if (presence.FOHCount > 0) {
+        // Only FOH present: allocate entire interval's tips to FOH.
+        const share = summary.TotalTips / presence.FOHCount;
+        presence.FOHEmployees.forEach(emp => {
+          allocations.push({ Employee: emp, Date: summary.Date, TipShare: share });
+        });
+      } else if (presence.BOHCount > 0) {
+        // Only BOH present: allocate entire interval's tips to BOH.
+        const share = summary.TotalTips / presence.BOHCount;
+        presence.BOHEmployees.forEach(emp => {
+          allocations.push({ Employee: emp, Date: summary.Date, TipShare: share });
+        });
+      } else {
+        // Shouldn't happen, but if presence record exists with zero in both, orphan.
+        orphaned.push({ Date: summary.Date, Department: "BOTH", OrphanedTip: summary.TotalTips });
       }
     } else {
-      // No employees present for this interval; orphan entire tip.
+      // No presence record: orphan entire interval.
       orphaned.push({ Date: summary.Date, Department: "BOTH", OrphanedTip: summary.TotalTips });
     }
   });
@@ -272,7 +269,7 @@ function allocateTips(intervalTipSummary, intervalPresence) {
 }
 
 // ---------------- Step 4: Redistribute Orphaned Tips ----------------
-// For each day, combine all orphaned tips and redistribute them evenly among all on‑duty employees.
+// For each day, combine orphaned tips and redistribute evenly among all on‑duty employees.
 function redistributeOrphanedTips(orphaned, employees) {
   const sumByDay = {};
   orphaned.forEach(item => {
@@ -299,7 +296,7 @@ function redistributeOrphanedTips(orphaned, employees) {
 }
 
 // ---------------- Step 5: Aggregate Final Totals ----------------
-// Sum allocations (direct plus redistributed) per employee.
+// Sum all allocations (direct and redistributed) per employee.
 function aggregateFinalTotals(allocations, redistribution) {
   const totals = {};
   allocations.forEach(rec => {
@@ -363,7 +360,7 @@ const transactionsByInterval = processTransactions(transactionsData, intervalMin
 const txnRange = computeDateRange(transactionsByInterval);
 console.log(`Transaction Data Date Range: ${txnRange.min.toISOString().split("T")[0]} to ${txnRange.max.toISOString().split("T")[0]}`);
 
-// Verify that the clock and transaction date ranges match.
+// Verify that the date ranges match.
 if (txnRange.min.toISOString().split("T")[0] !== clockRange.min.toISOString().split("T")[0] ||
     txnRange.max.toISOString().split("T")[0] !== clockRange.max.toISOString().split("T")[0]) {
   throw new Error("Date range mismatch between clock data and transaction data.");
@@ -394,7 +391,7 @@ const intervalPresenceCSVPath = path.join(outputDir, "interval_employee_presence
 fs.writeFileSync(intervalPresenceCSVPath, intervalPresenceCSV, "utf8");
 console.log(`Interval Employee Presence CSV written to: ${intervalPresenceCSVPath}`);
 
-// ---------- Step 3: Allocate Tips to Employees ----------
+// ---------- Step 3: Allocate Tips to Employees (with fallback) ----------
 const { allocations, orphaned } = allocateTips(intervalTipSummary, intervalPresence);
 
 // ---------- Step 4: Output Orphaned Tips CSV ----------
@@ -416,13 +413,13 @@ const finalTotals = aggregateFinalTotals(allocations, redistribution);
 // ---------- Sanity Check ----------
 const txnTotal = transactionsByInterval.reduce((sum, txn) => sum + txn.AmtTip, 0);
 const allocatedTotal = finalTotals.reduce((sum, rec) => sum + rec.TotalTips, 0);
-const tolerance = 0.01;
-if (Math.abs(allocatedTotal - txnTotal) >= tolerance) {
+if (Math.abs(allocatedTotal - txnTotal) >= 0.01) {
   throw new Error(`Sanity Check FAILED: Transaction Total ($${txnTotal.toFixed(2)}) does not match Allocated Total ($${allocatedTotal.toFixed(2)})`);
 }
 console.log("Sanity Check Passed: Allocated totals match transaction totals.");
 
 // ---------- Additional Daily Summaries ----------
+
 // Daily Transaction Summary (including orphaned tips).
 const dailyTxnSummary = aggregateDailyTransactionSummary(intervalTipSummary);
 const dailyOrphaned = orphaned.length ? aggregateDailyOrphanedTips(orphaned) : [];
