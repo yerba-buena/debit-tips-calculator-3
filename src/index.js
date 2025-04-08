@@ -13,6 +13,7 @@ const {
   redistributeUnallocatedTips,
   aggregateFinalTips
 } = require('./tipAllocation');
+const { analyzeDepartments } = require('./departmentAnalysis');
 const { createObjectCsvWriter } = require('csv-writer');
 const { formatDateTime } = require('./utils');
 
@@ -23,66 +24,6 @@ function writeCSV(filePath, header, records) {
     header: header,
   });
   return csvWriter.writeRecords(records);
-}
-
-// Helper: Analyze department classifications
-function analyzeDepartments(clockData) {
-  const departments = {};
-  const staffCategories = { FOH: 0, BOH: 0, Exec: 0, Unknown: 0 };
-  const employeeDepts = {};
-  
-  // Count unique employees by department
-  clockData.forEach(record => {
-    const dept = record.Department;
-    if (!departments[dept]) departments[dept] = new Set();
-    departments[dept].add(record.Employee);
-    
-    employeeDepts[record.Employee] = dept;
-  });
-  
-  // Determine category counts
-  console.log('\nDepartment Classification Analysis:');
-  console.log('----------------------------------');
-  Object.keys(departments).sort().forEach(dept => {
-    const count = departments[dept].size;
-    let category = 'Unknown';
-    
-    // Apply the same logic used in tipAllocation.js but with improved matching
-    const deptLower = dept.toLowerCase();
-    if (deptLower.includes('boh') || 
-        deptLower.includes('back of house') ||
-        deptLower.includes('kitchen') || 
-        deptLower.includes('chef') || 
-        deptLower.includes('cook') || 
-        deptLower.includes('dish')) {
-      category = 'BOH';
-      staffCategories.BOH += count;
-    } 
-    else if (deptLower.includes('exec') || 
-             deptLower.includes('manager') || 
-             deptLower.includes('management') ||
-             deptLower.includes('gm')) {
-      category = 'Exec';
-      staffCategories.Exec += count;
-    }
-    else {
-      category = 'FOH';
-      staffCategories.FOH += count;
-    }
-    
-    console.log(`  ${dept}: ${count} employees (Classified as: ${category})`);
-  });
-  
-  console.log('\nStaff Category Totals:');
-  console.log(`  FOH: ${staffCategories.FOH} employees`);
-  console.log(`  BOH: ${staffCategories.BOH} employees`);
-  console.log(`  Exec: ${staffCategories.Exec} employees`);
-  if (staffCategories.Unknown > 0) {
-    console.log(`  Unknown: ${staffCategories.Unknown} employees`);
-  }
-  console.log('----------------------------------');
-  
-  return { departments, staffCategories, employeeDepts };
 }
 
 // Parse command line arguments
