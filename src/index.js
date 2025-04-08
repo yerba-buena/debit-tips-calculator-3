@@ -120,7 +120,7 @@ async function main() {
 
   // Step 3: Compute tip pools
   console.log('Step 3: Computing tip pools...');
-  const staffMap = countStaffPerSlot(intervals);
+  const staffMap = countStaffPerSlot(intervals, intervalMinutes);  // Add intervalMinutes parameter
   const tipPools = computeTipPools(tipsBySlot, staffMap);
   await writeCSV(path.join(outputDir, 'step4_tip_pools.csv'),
     [
@@ -150,7 +150,7 @@ async function main() {
 
   // Step 4: Calculate individual tip shares
   console.log('Step 4: Calculating individual tip shares...');
-  const individualTipShares = calculateIndividualTipShares(intervals, tipPools);
+  const individualTipShares = calculateIndividualTipShares(intervals, tipPools, intervalMinutes);  // Add intervalMinutes parameter
   await writeCSV(path.join(outputDir, 'step5_individual_tip_shares.csv'),
     [
       { id: 'Employee', title: 'Employee' },
@@ -173,7 +173,7 @@ async function main() {
 
   // Step 5: Identify and redistribute unallocated tips
   console.log('Step 5: Identifying unallocated tips...');
-  const unallocatedTips = identifyUnallocatedTips(tipPools);
+  const unallocatedTips = identifyUnallocatedTips(tipPools, intervalMinutes);  // Add intervalMinutes parameter
   
   // Add summary of unallocated tips by day
   const unallocatedByDay = {};
@@ -202,7 +202,7 @@ async function main() {
   console.log('Unallocated tips identified and saved.');
 
   console.log('Step 6: Redistributing unallocated tips by day...');
-  const redistribution = require('./tipAllocation').redistributeUnallocatedTips(unallocatedTips, intervals);
+  const redistribution = require('./tipAllocation').redistributeUnallocatedTips(unallocatedTips, intervals, intervalMinutes);  // Add intervalMinutes parameter
   await writeCSV(path.join(outputDir, 'step7_unallocated_tip_distribution.csv'),
     [
       { id: 'Date', title: 'Date' },
