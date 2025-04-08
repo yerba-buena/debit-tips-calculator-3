@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const csvParser = require('csv-parser');
-const { floorToInterval } = require('./utils');
+const { floorToInterval, convertTimezone } = require('./utils');
 
 function readCSV(filePath) {
   return new Promise((resolve, reject) => {
@@ -20,10 +20,25 @@ async function loadTransactions(filePath) {
   return data;
 }
 
-function processTransactions(transactions, intervalMinutes = 15) {
+/**
+ * Process transaction data to aggregate tips by time slot
+ * @param {Array} transactions - Array of transaction records
+ * @param {Number} intervalMinutes - Size of time interval in minutes
+ * @param {Boolean} convertTz - Whether to convert between timezones
+ * @param {String} fromTz - Source timezone (default: 'America/Chicago')
+ * @param {String} toTz - Target timezone (default: 'America/New_York')
+ * @return {Array} - Array of tips by time slot
+ */
+function processTransactions(transactions, intervalMinutes = 15, convertTz = true, fromTz = 'America/Chicago', toTz = 'America/New_York') {
   let approved = transactions.filter(r => r.Approved && r.Approved.toLowerCase() === 'yes')
     .map(r => {
-      const transDT = new Date(r.TransDateTime);
+      let transDT = new Date(r.TransDateTime);
+
+      // Convert timezone if specified, using the more robust method
+      if (convertTz) {
+        transDT = convertTimezone(transDT, fromTz, toTz);
+      }
+
       const floored = floorToInterval(transDT, intervalMinutes);
       const dateStr = floored.toISOString().split('T')[0];
       return {
@@ -33,6 +48,7 @@ function processTransactions(transactions, intervalMinutes = 15) {
         Date: dateStr
       };
     });
+
   let slotMap = {};
   approved.forEach(txn => {
     const key = txn.Date + '|' + txn.TimeSlotStart.toISOString();
@@ -41,6 +57,7 @@ function processTransactions(transactions, intervalMinutes = 15) {
     }
     slotMap[key].AmtTip += txn.AmtTip;
   });
+
   return Object.values(slotMap);
 }
 

@@ -87,15 +87,27 @@ function analyzeDepartments(clockData) {
 
 // Parse command line arguments
 const args = minimist(process.argv.slice(2), {
-  string: ['clock', 'transactions', 'output'],
-  alias: { c: 'clock', t: 'transactions', o: 'output' },
+  string: ['clock', 'transactions', 'output', 'from-tz', 'to-tz'],
+  alias: { 
+    c: 'clock', 
+    t: 'transactions', 
+    o: 'output', 
+    n: 'no-tz-conversion',
+    from: 'from-tz',
+    to: 'to-tz'
+  },
   default: {
     clock: './input-data/clock-times.csv',
     transactions: './input-data/transactions.csv',
     output: './output/',
-    interval: '15'
-  }
+    interval: '15',
+    'no-tz-conversion': false,
+    'from-tz': 'America/Chicago',
+    'to-tz': 'America/New_York'
+  },
+  boolean: ['no-tz-conversion']
 });
+
 if (!args.clock || !args.transactions || !args.output) {
   console.error('Usage: node src/index.js --clock <clock_data.csv> --transactions <transactions.csv> --output <output_directory>');
   process.exit(1);
@@ -105,6 +117,9 @@ const clockFile = args.clock;
 const transactionsFile = args.transactions;
 const outputDir = args.output;
 const intervalMinutes = parseInt(args.interval, 10);
+const convertTimezone = !args['no-tz-conversion']; // Invert the logic - now true by default
+const fromTimezone = args['from-tz'];
+const toTimezone = args['to-tz'];
 
 // Validate interval
 const minutesInDay = 24 * 60; // 1440 minutes in a day
@@ -168,7 +183,14 @@ async function main() {
   // Step 2: Process transaction data
   console.log('Step 2: Processing transaction data...');
   const rawTransactions = await loadTransactions(transactionsFile);
-  const tipsBySlot = processTransactions(rawTransactions, intervalMinutes); // Pass the interval parameter here
+  const tipsBySlot = processTransactions(rawTransactions, intervalMinutes, convertTimezone, fromTimezone, toTimezone);
+
+  if (!convertTimezone) {
+    console.log('  Note: Transaction times NOT converted from source timezone');
+  } else {
+    console.log(`  Note: Transaction times converted from ${fromTimezone} to ${toTimezone} (default)`);
+  }
+  
   await writeCSV(path.join(outputDir, 'step3_tips_by_slot.csv'),
     [
       { id: 'Date', title: 'Date' },
