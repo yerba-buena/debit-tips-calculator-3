@@ -162,7 +162,20 @@ async function main() {
 
   // Step 5: Identify and redistribute unallocated tips
   console.log('Step 5: Identifying unallocated tips...');
-  const unallocatedTips = require('./tipAllocation').identifyUnallocatedTips(tipPools);
+  const unallocatedTips = identifyUnallocatedTips(tipPools);
+  
+  // Add summary of unallocated tips by day
+  const unallocatedByDay = {};
+  unallocatedTips.forEach(tip => {
+    if (!unallocatedByDay[tip.Date]) unallocatedByDay[tip.Date] = 0;
+    unallocatedByDay[tip.Date] += tip.UnallocatedTip;
+  });
+  
+  console.log('\nUnallocated Tips Summary by Day:');
+  Object.keys(unallocatedByDay).sort().forEach(date => {
+    console.log(`  ${date}: $${unallocatedByDay[date].toFixed(2)}`);
+  });
+  
   await writeCSV(path.join(outputDir, 'step6_unallocated_tips.csv'),
     [
       { id: 'Date', title: 'Date' },
@@ -199,13 +212,28 @@ async function main() {
   await writeCSV(path.join(outputDir, 'step8_final_employee_totals.csv'),
     [
       { id: 'Employee', title: 'Employee' },
-      { id: 'TotalTips', title: 'TotalTips' }
+      { id: 'AllocatedTips', title: 'Allocated Tips' },
+      { id: 'UnallocatedTips', title: 'Unallocated Tips' },
+      { id: 'TotalTips', title: 'Total Tips' }
     ],
     finalTotals.map(r => ({
       Employee: r.Employee,
+      AllocatedTips: r.AllocatedTips.toFixed(2),
+      UnallocatedTips: r.UnallocatedTips.toFixed(2),
       TotalTips: r.TotalTips.toFixed(2)
     }))
   );
+  
+  // Print unallocated tips percentage
+  const totalAllocated = finalTotals.reduce((acc, r) => acc + r.AllocatedTips, 0);
+  const totalUnallocated = finalTotals.reduce((acc, r) => acc + r.UnallocatedTips, 0);
+  const totalTips = totalAllocated + totalUnallocated;
+  
+  console.log('\nTip Allocation Summary:');
+  console.log(`  Total Allocated Tips: $${totalAllocated.toFixed(2)} (${(totalAllocated/totalTips*100).toFixed(1)}%)`);
+  console.log(`  Total Unallocated Tips: $${totalUnallocated.toFixed(2)} (${(totalUnallocated/totalTips*100).toFixed(1)}%)`);
+  console.log(`  Total Tips: $${totalTips.toFixed(2)}`);
+  
   console.log('Final employee tip totals aggregated and saved.');
 
   // Step 8: Sanity check

@@ -117,21 +117,38 @@ function redistributeUnallocatedTips(unallocatedTips, intervals, intervalMinutes
 
 function aggregateFinalTips(individualTipShares, redistribution) {
   let tipByEmployee = {};
+  
+  // Initialize with structure to track both allocated and unallocated
   individualTipShares.forEach(rec => {
-    if (!tipByEmployee[rec.Employee]) tipByEmployee[rec.Employee] = 0;
-    tipByEmployee[rec.Employee] += rec.IndividualTipShare;
+    if (!tipByEmployee[rec.Employee]) {
+      tipByEmployee[rec.Employee] = {
+        allocatedTips: 0,
+        unallocatedTips: 0
+      };
+    }
+    tipByEmployee[rec.Employee].allocatedTips += rec.IndividualTipShare;
   });
+  
   redistribution.forEach(rec => {
-    if (!tipByEmployee[rec.Employee]) tipByEmployee[rec.Employee] = 0;
-    tipByEmployee[rec.Employee] += rec.UnallocatedTipShare;
+    if (!tipByEmployee[rec.Employee]) {
+      tipByEmployee[rec.Employee] = {
+        allocatedTips: 0,
+        unallocatedTips: 0
+      };
+    }
+    tipByEmployee[rec.Employee].unallocatedTips += rec.UnallocatedTipShare;
   });
+  
   let finalTotals = [];
   for (let emp in tipByEmployee) {
     finalTotals.push({
       Employee: emp,
-      TotalTips: tipByEmployee[emp]
+      AllocatedTips: tipByEmployee[emp].allocatedTips,
+      UnallocatedTips: tipByEmployee[emp].unallocatedTips,
+      TotalTips: tipByEmployee[emp].allocatedTips + tipByEmployee[emp].unallocatedTips
     });
   }
+  
   return finalTotals;
 }
 
