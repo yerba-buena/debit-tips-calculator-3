@@ -1,36 +1,7 @@
 // src/tipAllocation.js
 
 const { formatDateTime } = require('./utils');
-
-/**
- * Categorize an employee based on department and title
- * @param {Object} employee - Employee record with Department and Employee (name/title) fields
- * @returns {String} - 'FOH', 'BOH', or 'EXEC'
- */
-function categorizeEmployee(employee) {
-  // Check for executives first (they're excluded from tip allocation)
-  if (employee.Employee && (
-      employee.Employee.includes('CEO') ||
-      employee.Employee.includes('COO') || 
-      employee.Employee.includes('Chief Operations Officer') ||
-      /\bC[A-Z]{2}\b/.test(employee.Employee) // Match any 3-letter C-suite title (CFO, CTO, CIO, etc.)
-  )) {
-    return 'EXEC';
-  }
-  
-  // Check department name for categorization
-  const dept = (employee.Department || '').toLowerCase();
-  
-  if (dept.includes('front')) {
-    return 'FOH';
-  } else if (dept.includes('back')) {
-    return 'BOH';
-  } else if (dept === 'management') {
-    return 'FOH'; // Management is FOH unless they're an executive
-  } else {
-    return 'BOH'; // Default case: assume BOH when not possible to determine
-  }
-}
+const { categorizeEmployee } = require('./employeeClassification');
 
 function countStaffPerSlot(intervals, intervalMinutes) {
   const slotStaffMap = {};

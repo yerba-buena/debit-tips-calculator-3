@@ -1,3 +1,5 @@
+const { categorizeDepartment } = require('./employeeClassification');
+
 /**
  * Analyze department classifications from clock data
  * @param {Array} clockData - The clock data records
@@ -22,25 +24,19 @@ function analyzeDepartments(clockData) {
   console.log('----------------------------------');
   Object.keys(departments).sort().forEach(dept => {
     const count = departments[dept].size;
-    let category = 'Unknown';
     
-    // Apply the same logic used in tipAllocation.js but with improved matching
-    const deptLower = dept.toLowerCase();
-    if (deptLower.includes('boh') || 
-        deptLower.includes('back of house')) {
-      category = 'BOH';
-      staffCategories.BOH += count;
-    } 
-    else if (deptLower.includes('exec') || 
-             deptLower.includes('manager') || 
-             deptLower.includes('management') ||
-             deptLower.includes('gm')) {
-      category = 'Exec';
-      staffCategories.Exec += count;
-    }
-    else {
-      category = 'FOH';
+    // Use the centralized categorization logic
+    const category = categorizeDepartment(dept);
+    
+    // Update the appropriate counter based on the category
+    if (category === 'FOH') {
       staffCategories.FOH += count;
+    } else if (category === 'BOH') {
+      staffCategories.BOH += count;
+    } else if (category === 'EXEC') {
+      staffCategories.Exec += count;
+    } else {
+      staffCategories.Unknown += count;
     }
     
     console.log(`  ${dept}: ${count} employees (Classified as: ${category})`);
