@@ -72,48 +72,76 @@ function countStaffPerSlot(intervals, intervalMinutes) {
 }
 
 function computeTipPools(tipsBySlot, staffMap) {
-  // Debug: Print a few samples of tipsBySlot
-  console.log("Sample tips by slot (first 3):");
-  tipsBySlot.slice(0, 3).forEach(slot => {
-    console.log(`  Date: ${slot.Date}, TimeSlotStart: ${slot.TimeSlotStart}, AmtTip: ${slot.AmtTip}`);
-  });
+  // Create a map of staff by date to handle time slots with no scheduled staff
+  const staffByDate = {};
   
-  // Debug: Print a few keys from staffMap
-  console.log("Sample staffMap keys in computeTipPools (first 3):");
-  Object.keys(staffMap).slice(0, 3).forEach(key => {
-    console.log(`  Key: ${key}`);
+  for (const key in staffMap) {
+    const [date] = key.split('|');
+    if (!staffByDate[date]) {
+      staffByDate[date] = { FOH: 0, BOH: 0, EXEC: 0, uniqueFOH: new Set(), uniqueBOH: new Set() };
+    }
+    
+    // Record the presence of each department on this day
+    if (staffMap[key].FOH > 0) staffByDate[date].FOH = 1;
+    if (staffMap[key].BOH > 0) staffByDate[date].BOH = 1;
+    
+    // We'll also need to count unique employees for later redistribution
+    // This would require enhancing the staffMap to track unique employees, but we'll leave it as a placeholder
+  }
+  
+  console.log("Staff by date summary:");
+  Object.keys(staffByDate).forEach(date => {
+    console.log(`  ${date}: FOH=${staffByDate[date].FOH > 0 ? 'present' : 'none'}, BOH=${staffByDate[date].BOH > 0 ? 'present' : 'none'}`);
   });
 
   return tipsBySlot.map(slot => {
     const key = `${slot.Date}|${slot.TimeSlotStart.toISOString()}`;
-    
-    // Debug: Log key lookup
-    if (slot.AmtTip > 0) {
-      console.log(`Looking up key: ${key}, Found: ${!!staffMap[key]}`);
-      if (staffMap[key]) {
-        console.log(`  Staff for this slot: FOH=${staffMap[key].FOH}, BOH=${staffMap[key].BOH}`);
-      }
-    }
-    
     const staff = staffMap[key] || { FOH: 0, BOH: 0, EXEC: 0, total: 0 };
     const totalStaff = staff.FOH + staff.BOH;
     
     let fohTipPool = 0;
     let bohTipPool = 0;
     
-    // Handle case where only one department is present
-    if (staff.FOH > 0 && staff.BOH === 0) {
-      // Only FOH present - they get all tips
-      fohTipPool = slot.AmtTip;
-    } else if (staff.FOH === 0 && staff.BOH > 0) {
-      // Only BOH present - they get all tips
-      bohTipPool = slot.AmtTip;
-    } else if (totalStaff > 0) {
-      // Both departments present - split according to normal rules
-      fohTipPool = (staff.FOH / totalStaff) * slot.AmtTip;
-      bohTipPool = (staff.BOH / totalStaff) * slot.AmtTip;
+    if (totalStaff > 0) {
+      // Normal case: Staff is present for this time slot
+      if (staff.FOH > 0 && staff.BOH === 0) {
+        // Only FOH present - they get all tips
+        fohTipPool = slot.AmtTip;
+      } else if (staff.FOH === 0 && staff.BOH > 0) {
+        // Only BOH present - they get all tips
+        bohTipPool = slot.AmtTip;
+      } else if (totalStaff > 0) {
+        // Both departments present - split according to headcount
+        fohTipPool = (staff.FOH / totalStaff) * slot.AmtTip;
+        bohTipPool = (staff.BOH / totalStaff) * slot.AmtTip;
+      }
+    } 
+    else if (staffByDate[slot.Date]) {
+      // No staff in this specific time slot, but staff worked on this day
+      // Allocate based on which departments were present that day
+      const dayStaff = staffByDate[slot.Date];
+      const deptPresent = (dayStaff.FOH > 0 ? 1 : 0) + (dayStaff.BOH > 0 ? 1 : 0);
+      
+      if (deptPresent === 0) {
+        // If no staff on this day, mark as unallocated
+        // This shouldn't happen if there's valid clock data
+      } 
+      else if (dayStaff.FOH > 0 && dayStaff.BOH === 0) {
+        // Only FOH worked that day
+        fohTipPool = slot.AmtTip;
+      } 
+      else if (dayStaff.FOH === 0 && dayStaff.BOH > 0) {
+        // Only BOH worked that day
+        bohTipPool = slot.AmtTip;
+      } 
+      else {
+        // Both departments worked that day - split 50/50
+        // This is a simplification; could be refined with actual staff counts
+        fohTipPool = slot.AmtTip / 2;
+        bohTipPool = slot.AmtTip / 2;
+      }
     }
-    // If no staff present, both pools remain 0
+    // If no staff worked that day at all, both pools remain 0
     
     return {
       Date: slot.Date,
@@ -121,7 +149,7 @@ function computeTipPools(tipsBySlot, staffMap) {
       AmtTip: slot.AmtTip,
       FOHCount: staff.FOH,
       BOHCount: staff.BOH,
-      ExecCount: staff.EXEC || 0, // Changed from Exec to EXEC to match naming in countStaffPerSlot
+      ExecCount: staff.EXEC || 0,
       FOHTipPool: fohTipPool,
       BOHTipPool: bohTipPool,
       TotalStaff: totalStaff
