@@ -44,6 +44,16 @@ if (!args.clock || !args.transactions || !args.output) {
 const clockFile = args.clock;
 const transactionsFile = args.transactions;
 const outputDir = args.output;
+const intervalMinutes = parseInt(args.interval, 10);
+
+// Validate interval
+const minutesInDay = 24 * 60; // 1440 minutes in a day
+if (minutesInDay % intervalMinutes !== 0) {
+  console.error(`Error: The interval (${intervalMinutes}) must divide the day evenly.`);
+  console.error('Valid intervals include: 1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 30, 60, etc.');
+  console.error('These are intervals that divide 1440 minutes (24 hours) with no remainder.');
+  process.exit(1);
+}
 
 // Ensure output directory exists
 if (!fs.existsSync(outputDir)) {
@@ -55,7 +65,6 @@ async function main() {
   console.log('Step 1: Processing clock data...');
   const rawClockData = await loadClockData(clockFile);
   const cleanedClock = processClockData(rawClockData);
-  const intervalMinutes = parseInt(args.interval, 10);
   const intervals = expandToIntervals(cleanedClock, intervalMinutes);
   await writeCSV(path.join(outputDir, 'step1_cleaned_clock_data.csv'),
     [
@@ -120,6 +129,7 @@ async function main() {
       { id: 'AmtTip', title: 'AmtTip' },
       { id: 'FOHCount', title: 'FOHCount' },
       { id: 'BOHCount', title: 'BOHCount' },
+      { id: 'ExecCount', title: 'ExecCount' },
       { id: 'FOHTipPool', title: 'FOHTipPool' },
       { id: 'BOHTipPool', title: 'BOHTipPool' },
       { id: 'TotalStaff', title: 'TotalStaff' }
@@ -130,6 +140,7 @@ async function main() {
       AmtTip: r.AmtTip.toFixed(2),
       FOHCount: r.FOHCount,
       BOHCount: r.BOHCount,
+      ExecCount: r.ExecCount || 0,
       FOHTipPool: r.FOHTipPool.toFixed(2),
       BOHTipPool: r.BOHTipPool.toFixed(2),
       TotalStaff: r.TotalStaff
