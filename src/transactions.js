@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const csvParser = require('csv-parser');
-const { floorTo15 } = require('./utils');
+const { floorToInterval } = require('./utils');
 
 function readCSV(filePath) {
   return new Promise((resolve, reject) => {
@@ -20,11 +20,11 @@ async function loadTransactions(filePath) {
   return data;
 }
 
-function processTransactions(transactions) {
+function processTransactions(transactions, intervalMinutes = 15) {
   let approved = transactions.filter(r => r.Approved && r.Approved.toLowerCase() === 'yes')
     .map(r => {
       const transDT = new Date(r.TransDateTime);
-      const floored = floorTo15(transDT);
+      const floored = floorToInterval(transDT, intervalMinutes);
       const dateStr = floored.toISOString().split('T')[0];
       return {
         TransDateTime: transDT,

@@ -22,11 +22,14 @@ const formatDateTime = (dt) => {
   );
 };
 
-const floorTo15 = (dt) => {
+const floorToInterval = (dt, intervalMinutes = 15) => {
   const minutes = dt.getMinutes();
-  const remainder = minutes % 15;
+  const remainder = minutes % intervalMinutes;
   return new Date(dt.getTime() - remainder * 60000 - dt.getSeconds() * 1000 - dt.getMilliseconds());
 };
+
+// For backward compatibility (can be removed later)
+const floorTo15 = (dt) => floorToInterval(dt, 15);
 
 const addMinutes = (dt, minutes) => {
   return new Date(dt.getTime() + minutes * 60000);
@@ -36,5 +39,6 @@ module.exports = {
   parseDateTime,
   formatDateTime,
   floorTo15,
+  floorToInterval,
   addMinutes
 };

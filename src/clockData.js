@@ -77,6 +77,10 @@ function processClockData(clockData) {
  *
  * The interval must be between 2 and 60 minutes and evenly divide 1440.
  * If invalid, defaults to 15 minutes.
+ * 
+ * Note: Intervals are based on actual clock-in time, not aligned to fixed
+ * time boundaries (like :00, :15, etc.). This ensures accurate representation
+ * of employee work time, but requires careful syncing with transaction data.
  */
 function expandToIntervals(cleanedClock, intervalMinutes = 15) {
   // Validate the intervalMinutes parameter

@@ -94,7 +94,7 @@ async function main() {
   // Step 2: Process transaction data
   console.log('Step 2: Processing transaction data...');
   const rawTransactions = await loadTransactions(transactionsFile);
-  const tipsBySlot = processTransactions(rawTransactions);
+  const tipsBySlot = processTransactions(rawTransactions, intervalMinutes); // Pass the interval parameter here
   await writeCSV(path.join(outputDir, 'step3_tips_by_slot.csv'),
     [
       { id: 'Date', title: 'Date' },

@@ -1,6 +1,6 @@
 // src/tipAllocation.js
 
-function countStaffPerSlot(intervals) {
+function countStaffPerSlot(intervals, intervalMinutes) {
   let slotStaffMap = {};
   intervals.forEach(rec => {
     const key = rec.Date + '|' + rec.TimeSlotStart.toISOString();
@@ -16,7 +16,7 @@ function countStaffPerSlot(intervals) {
   return slotStaffMap;
 }
 
-function computeTipPools(tipsBySlot, slotStaffMap) {
+function computeTipPools(tipsBySlot, slotStaffMap, intervalMinutes) {
   return tipsBySlot.map(slot => {
     const key = slot.Date + '|' + slot.TimeSlotStart.toISOString();
     const staff = slotStaffMap[key] || { FOH: 0, BOH: 0 };
@@ -33,7 +33,7 @@ function computeTipPools(tipsBySlot, slotStaffMap) {
   });
 }
 
-function calculateIndividualTipShares(intervals, tipPools) {
+function calculateIndividualTipShares(intervals, tipPools, intervalMinutes) {
   let tipPoolMap = {};
   tipPools.forEach(pool => {
     const key = pool.Date + '|' + pool.TimeSlotStart.toISOString();
@@ -63,7 +63,7 @@ function calculateIndividualTipShares(intervals, tipPools) {
   return individualTipShares;
 }
 
-function identifyUnallocatedTips(tipPools) {
+function identifyUnallocatedTips(tipPools, intervalMinutes) {
   let fullyUnallocated = tipPools.filter(r => r.TotalStaff === 0)
     .map(r => ({
       Date: r.Date,
@@ -88,7 +88,7 @@ function identifyUnallocatedTips(tipPools) {
   return fullyUnallocated.concat(partialUnallocated);
 }
 
-function redistributeUnallocatedTips(unallocatedTips, intervals) {
+function redistributeUnallocatedTips(unallocatedTips, intervals, intervalMinutes) {
   let unallocByDay = {};
   unallocatedTips.forEach(rec => {
     if (!unallocByDay[rec.Date]) unallocByDay[rec.Date] = 0;
