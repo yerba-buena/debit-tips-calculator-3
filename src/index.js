@@ -28,14 +28,15 @@ function writeCSV(filePath, header, records) {
 
 // Parse command line arguments
 const args = minimist(process.argv.slice(2), {
-  string: ['clock', 'transactions', 'output', 'from-tz', 'to-tz'],
+  string: ['clock', 'transactions', 'output', 'from-tz', 'to-tz', 'boh-pct'],
   alias: { 
     c: 'clock', 
     t: 'transactions', 
     o: 'output', 
     n: 'no-tz-conversion',
     from: 'from-tz',
-    to: 'to-tz'
+    to: 'to-tz',
+    b: 'boh-pct'
   },
   default: {
     clock: './input-data/clock-times.csv',
@@ -44,7 +45,8 @@ const args = minimist(process.argv.slice(2), {
     interval: '15',
     'no-tz-conversion': false,
     'from-tz': 'America/Chicago',
-    'to-tz': 'America/New_York'
+    'to-tz': 'America/New_York',
+    'boh-pct': null
   },
   boolean: ['no-tz-conversion']
 });
@@ -61,6 +63,7 @@ const intervalMinutes = parseInt(args.interval, 10);
 const convertTimezone = !args['no-tz-conversion']; // Invert the logic - now true by default
 const fromTimezone = args['from-tz'];
 const toTimezone = args['to-tz'];
+const bohPctOverride = args['boh-pct'] ? parseInt(args['boh-pct'], 10) : null;
 
 // Validate interval
 const minutesInDay = 24 * 60; // 1440 minutes in a day
@@ -68,6 +71,12 @@ if (minutesInDay % intervalMinutes !== 0) {
   console.error(`Error: The interval (${intervalMinutes}) must divide the day evenly.`);
   console.error('Valid intervals include: 1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 30, 60, etc.');
   console.error('These are intervals that divide 1440 minutes (24 hours) with no remainder.');
+  process.exit(1);
+}
+
+// Validate BOH percentage if provided
+if (bohPctOverride !== null && (bohPctOverride < 0 || bohPctOverride > 100)) {
+  console.error(`Error: BOH percentage (${bohPctOverride}) must be between 0 and 100.`);
   process.exit(1);
 }
 
@@ -148,8 +157,8 @@ async function main() {
 
   // Step 3: Compute tip pools
   console.log('Step 3: Computing tip pools...');
-  const staffMap = countStaffPerSlot(intervals, intervalMinutes);  // Add intervalMinutes parameter
-  const tipPools = computeTipPools(tipsBySlot, staffMap);
+  const staffMap = countStaffPerSlot(intervals, intervalMinutes);
+  const tipPools = computeTipPools(tipsBySlot, staffMap, bohPctOverride);
   await writeCSV(path.join(outputDir, 'step4_tip_pools.csv'),
     [
       { id: 'Date', title: 'Date' },

@@ -42,88 +42,90 @@ function countStaffPerSlot(intervals, intervalMinutes) {
   return slotStaffMap;
 }
 
-function computeTipPools(tipsBySlot, staffMap) {
-  // Create a map of staff by date to handle time slots with no scheduled staff
-  const staffByDate = {};
+/**
+ * Compute tip pools by time slot
+ * @param {Array} tipsBySlot - Tips aggregated by time slot
+ * @param {Object} staffMap - Map of staff counts by time slot
+ * @param {Number} bohPctOverride - Optional override for BOH percentage (0-100)
+ * @return {Array} - Array of tip pools by time slot with allocation info
+ */
+function computeTipPools(tipsBySlot, staffMap, bohPctOverride = null) {
+  // Configure tip distribution ratio
+  const BOH_RATIO = bohPctOverride !== null ? (bohPctOverride / 100) : 0.15; // 15% to BOH by default
+  const FOH_RATIO = 1 - BOH_RATIO; // 85% to FOH by default
   
-  for (const key in staffMap) {
-    const [date] = key.split('|');
-    if (!staffByDate[date]) {
-      staffByDate[date] = { FOH: 0, BOH: 0, EXEC: 0, uniqueFOH: new Set(), uniqueBOH: new Set() };
-    }
-    
-    // Record the presence of each department on this day
-    if (staffMap[key].FOH > 0) staffByDate[date].FOH = 1;
-    if (staffMap[key].BOH > 0) staffByDate[date].BOH = 1;
-    
-    // We'll also need to count unique employees for later redistribution
-    // This would require enhancing the staffMap to track unique employees, but we'll leave it as a placeholder
-  }
+  // Display the tip distribution being used
+  console.log(`Tip Distribution: FOH=${(FOH_RATIO*100).toFixed(0)}%, BOH=${(BOH_RATIO*100).toFixed(0)}%`);
   
-  console.log("Staff by date summary:");
-  Object.keys(staffByDate).forEach(date => {
-    console.log(`  ${date}: FOH=${staffByDate[date].FOH > 0 ? 'present' : 'none'}, BOH=${staffByDate[date].BOH > 0 ? 'present' : 'none'}`);
+  // Sample the first few intervals
+  const sampleKeys = Object.keys(staffMap).slice(0, 3);
+  console.log('Sample staff map keys (first 3):');
+  sampleKeys.forEach(key => {
+    const staff = staffMap[key];
+    console.log(`  Key: ${key}, Staff: FOH=${staff.FOH}, BOH=${staff.BOH}`);
   });
-
+  
+  // Check for staff presence by date
+  const staffByDate = {};
+  Object.keys(staffMap).forEach(key => {
+    const [date, _] = key.split('|');
+    if (!staffByDate[date]) staffByDate[date] = { FOH: false, BOH: false };
+    
+    const staff = staffMap[key];
+    if (staff.FOH > 0) staffByDate[date].FOH = true;
+    if (staff.BOH > 0) staffByDate[date].BOH = true;
+  });
+  
+  console.log('Staff by date summary:');
+  Object.keys(staffByDate).sort().forEach(date => {
+    const staff = staffByDate[date];
+    console.log(`  ${date}: FOH=${staff.FOH ? 'present' : 'absent'}, BOH=${staff.BOH ? 'present' : 'absent'}`);
+  });
+  
   return tipsBySlot.map(slot => {
     const key = `${slot.Date}|${slot.TimeSlotStart.toISOString()}`;
-    const staff = staffMap[key] || { FOH: 0, BOH: 0, EXEC: 0, total: 0 };
-    const totalStaff = staff.FOH + staff.BOH;
+    const staff = staffMap[key] || { FOH: 0, BOH: 0, EXEC: 0 };
     
-    let fohTipPool = 0;
-    let bohTipPool = 0;
+    const FOHCount = staff.FOH || 0;
+    const BOHCount = staff.BOH || 0;
+    const ExecCount = staff.EXEC || 0;
+    const TotalStaff = FOHCount + BOHCount + ExecCount;
     
-    if (totalStaff > 0) {
-      // Normal case: Staff is present for this time slot
-      if (staff.FOH > 0 && staff.BOH === 0) {
-        // Only FOH present - they get all tips
-        fohTipPool = slot.AmtTip;
-      } else if (staff.FOH === 0 && staff.BOH > 0) {
-        // Only BOH present - they get all tips
-        bohTipPool = slot.AmtTip;
-      } else if (totalStaff > 0) {
-        // Both departments present - split according to headcount
-        fohTipPool = (staff.FOH / totalStaff) * slot.AmtTip;
-        bohTipPool = (staff.BOH / totalStaff) * slot.AmtTip;
-      }
+    let FOHTipPool = 0;
+    let BOHTipPool = 0;
+    
+    // Handle cases based on staff presence
+    if (TotalStaff === 0) {
+      // No staff - all tips become unallocated
+      FOHTipPool = 0;
+      BOHTipPool = 0;
     } 
-    else if (staffByDate[slot.Date]) {
-      // No staff in this specific time slot, but staff worked on this day
-      // Allocate based on which departments were present that day
-      const dayStaff = staffByDate[slot.Date];
-      const deptPresent = (dayStaff.FOH > 0 ? 1 : 0) + (dayStaff.BOH > 0 ? 1 : 0);
-      
-      if (deptPresent === 0) {
-        // If no staff on this day, mark as unallocated
-        // This shouldn't happen if there's valid clock data
-      } 
-      else if (dayStaff.FOH > 0 && dayStaff.BOH === 0) {
-        // Only FOH worked that day
-        fohTipPool = slot.AmtTip;
-      } 
-      else if (dayStaff.FOH === 0 && dayStaff.BOH > 0) {
-        // Only BOH worked that day
-        bohTipPool = slot.AmtTip;
-      } 
-      else {
-        // Both departments worked that day - split 50/50
-        // This is a simplification; could be refined with actual staff counts
-        fohTipPool = slot.AmtTip / 2;
-        bohTipPool = slot.AmtTip / 2;
-      }
+    else if (FOHCount > 0 && BOHCount > 0) {
+      // Both FOH and BOH present - use specified distribution
+      FOHTipPool = slot.AmtTip * FOH_RATIO;
+      BOHTipPool = slot.AmtTip * BOH_RATIO;
     }
-    // If no staff worked that day at all, both pools remain 0
+    else if (FOHCount > 0 && BOHCount === 0) {
+      // Only FOH present - allocate all tips to FOH
+      FOHTipPool = slot.AmtTip;
+      BOHTipPool = 0;
+    }
+    else if (BOHCount > 0 && FOHCount === 0) {
+      // Only BOH present - allocate all tips to BOH
+      FOHTipPool = 0;
+      BOHTipPool = slot.AmtTip;
+    }
     
     return {
       Date: slot.Date,
       TimeSlotStart: slot.TimeSlotStart,
       AmtTip: slot.AmtTip,
-      FOHCount: staff.FOH,
-      BOHCount: staff.BOH,
-      ExecCount: staff.EXEC || 0,
-      FOHTipPool: fohTipPool,
-      BOHTipPool: bohTipPool,
-      TotalStaff: totalStaff
+      FOHCount,
+      BOHCount,
+      ExecCount,
+      TotalStaff,
+      FOHTipPool,
+      BOHTipPool
     };
   });
 }
