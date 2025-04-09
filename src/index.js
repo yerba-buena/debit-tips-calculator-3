@@ -273,6 +273,88 @@ async function main() {
   console.log(`  Total Unallocated Tips: $${totalUnallocated.toFixed(2)} (${(totalUnallocated/totalTips*100).toFixed(1)}%)`);
   console.log(`  Total Tips: $${totalTips.toFixed(2)}`);
   
+  // Add detailed diagnostics to understand unallocated tips
+  console.log('\nDIAGNOSTIC INFORMATION:');
+  
+  // Check for timeslots with tips but no staff
+  const tipSlotsWithNoStaff = tipPools.filter(tp => tp.AmtTip > 0 && tp.TotalStaff === 0);
+  if (tipSlotsWithNoStaff.length > 0) {
+    console.log(`\nFound ${tipSlotsWithNoStaff.length} time slots with tips but NO STAFF present:`);
+    tipSlotsWithNoStaff.slice(0, 5).forEach(slot => {
+      console.log(`  Date: ${slot.Date}, Time: ${formatDateTime(slot.TimeSlotStart)}, Tips: $${slot.AmtTip.toFixed(2)}`);
+    });
+    if (tipSlotsWithNoStaff.length > 5) {
+      console.log(`  ... and ${tipSlotsWithNoStaff.length - 5} more slots`);
+    }
+  }
+  
+  // Check for imbalanced staff (e.g., FOH but no BOH, or vice versa)
+  const imbalancedStaffSlots = tipPools.filter(tp => 
+    tp.AmtTip > 0 && tp.TotalStaff > 0 && (tp.FOHCount === 0 || tp.BOHCount === 0)
+  );
+  if (imbalancedStaffSlots.length > 0) {
+    console.log(`\nFound ${imbalancedStaffSlots.length} time slots with tips but IMBALANCED STAFF:`);
+    imbalancedStaffSlots.slice(0, 5).forEach(slot => {
+      console.log(`  Date: ${slot.Date}, Time: ${formatDateTime(slot.TimeSlotStart)}, Tips: $${slot.AmtTip.toFixed(2)}, FOH: ${slot.FOHCount}, BOH: ${slot.BOHCount}`);
+    });
+    if (imbalancedStaffSlots.length > 5) {
+      console.log(`  ... and ${imbalancedStaffSlots.length - 5} more slots`);
+    }
+  }
+  
+  // Analyze distribution of unallocated tips by hour of day
+  const unallocatedByHour = {};
+  unallocatedTips.forEach(tip => {
+    const hour = new Date(tip.TimeSlotStart).getHours();
+    if (!unallocatedByHour[hour]) unallocatedByHour[hour] = 0;
+    unallocatedByHour[hour] += tip.UnallocatedTip;
+  });
+  
+  console.log('\nUnallocated tips by hour of day:');
+  Object.keys(unallocatedByHour).sort((a, b) => Number(a) - Number(b)).forEach(hour => {
+    const hourFormatted = hour.padStart(2, '0') + ':00';
+    console.log(`  ${hourFormatted}: $${unallocatedByHour[hour].toFixed(2)}`);
+  });
+  
+  // Add a diagnostic CSV output with detailed information about each timeslot
+  await writeCSV(path.join(outputDir, 'diagnostic_timeslot_analysis.csv'),
+    [
+      { id: 'Date', title: 'Date' },
+      { id: 'TimeSlotStart', title: 'TimeSlotStart' },
+      { id: 'AmtTip', title: 'AmtTip' },
+      { id: 'FOHCount', title: 'FOHCount' },
+      { id: 'BOHCount', title: 'BOHCount' },
+      { id: 'ExecCount', title: 'ExecCount' },
+      { id: 'TotalStaff', title: 'TotalStaff' },
+      { id: 'FOHTipPool', title: 'FOHTipPool' },
+      { id: 'BOHTipPool', title: 'BOHTipPool' },
+      { id: 'UnallocatedTip', title: 'UnallocatedTip' },
+      { id: 'HasStaffIssue', title: 'HasStaffIssue' }
+    ],
+    tipPools.map(tp => {
+      // Find corresponding unallocated tip entry
+      const unallocated = unallocatedTips.find(ut => 
+        ut.Date === tp.Date && 
+        new Date(ut.TimeSlotStart).getTime() === new Date(tp.TimeSlotStart).getTime()
+      );
+      
+      return {
+        Date: tp.Date,
+        TimeSlotStart: formatDateTime(tp.TimeSlotStart),
+        AmtTip: tp.AmtTip.toFixed(2),
+        FOHCount: tp.FOHCount,
+        BOHCount: tp.BOHCount,
+        ExecCount: tp.ExecCount || 0,
+        TotalStaff: tp.TotalStaff,
+        FOHTipPool: tp.FOHTipPool.toFixed(2),
+        BOHTipPool: tp.BOHTipPool.toFixed(2),
+        UnallocatedTip: unallocated ? unallocated.UnallocatedTip.toFixed(2) : "0.00",
+        HasStaffIssue: (tp.AmtTip > 0 && (tp.TotalStaff === 0 || tp.FOHCount === 0 || tp.BOHCount === 0)) ? "YES" : "NO"
+      };
+    })
+  );
+  
+  console.log('Created diagnostic_timeslot_analysis.csv with detailed information about each timeslot.');
   console.log('Final employee tip totals aggregated and saved.');
 
   // Step 8: Sanity check
