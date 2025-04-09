@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const csvParser = require('csv-parser');
-const { parseDateTime, addMinutes } = require('./utils');
+const { parseDateTime, addMinutes, createStandardInterval } = require('./utils');
 const { Readable } = require('stream');
 
 // Reads CSV file without any pre-processing (not used for clock data)
@@ -99,9 +99,8 @@ function processClockData(clockData) {
  * The interval must be between 2 and 60 minutes and evenly divide 1440.
  * If invalid, defaults to 15 minutes.
  * 
- * Note: Intervals are based on actual clock-in time, not aligned to fixed
- * time boundaries (like :00, :15, etc.). This ensures accurate representation
- * of employee work time, but requires careful syncing with transaction data.
+ * Note: Intervals are floored to standard time boundaries (like :00, :15, etc.)
+ * to ensure alignment with transaction data.
  */
 function expandToIntervals(cleanedClock, intervalMinutes = 15) {
   // Add date range logging to understand the scope of clock data
@@ -124,20 +123,21 @@ function expandToIntervals(cleanedClock, intervalMinutes = 15) {
   
   let intervals = [];
   cleanedClock.forEach(row => {
-    let slotStart = new Date(row.TimeIn);
-    // Continue generating intervals as long as slotStart is before the clock-out time.
-    // Even if the employee clocks out in the middle of an interval,
-    // we include that entire block.
+    // Floor the timeIn to the standard interval boundary
+    let standardInterval = createStandardInterval(row.TimeIn, intervalMinutes, row.Date);
+    let slotStart = standardInterval.TimeSlotStart;
+    
+    // Continue generating intervals as long as slotStart is before the clock-out time
     while (slotStart < row.TimeOut) {
-      let slotEnd = addMinutes(slotStart, intervalMinutes);
+      let standardInterval = createStandardInterval(slotStart, intervalMinutes, row.Date);
       intervals.push({
         Employee: row.Employee,
         Department: row.Department,
-        Date: row.Date,
-        TimeSlotStart: new Date(slotStart),
-        TimeSlotEnd: new Date(slotEnd)
+        Date: standardInterval.Date,
+        TimeSlotStart: standardInterval.TimeSlotStart,
+        TimeSlotEnd: standardInterval.TimeSlotEnd
       });
-      slotStart = slotEnd;
+      slotStart = standardInterval.TimeSlotEnd;
     }
   });
   return intervals;

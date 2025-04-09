@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const csvParser = require('csv-parser');
-const { floorToInterval, convertTimezone } = require('./utils');
+const { floorToInterval, convertTimezone, createStandardInterval } = require('./utils');
 
 function readCSV(filePath) {
   return new Promise((resolve, reject) => {
@@ -39,13 +39,14 @@ function processTransactions(transactions, intervalMinutes = 15, convertTz = tru
         transDT = convertTimezone(transDT, fromTz, toTz);
       }
 
-      const floored = floorToInterval(transDT, intervalMinutes);
-      const dateStr = floored.toISOString().split('T')[0];
+      // Use the standardized interval function
+      const standardInterval = createStandardInterval(transDT, intervalMinutes);
+      
       return {
         TransDateTime: transDT,
         AmtTip: parseFloat(r.AmtTip),
-        TimeSlotStart: floored,
-        Date: dateStr
+        TimeSlotStart: standardInterval.TimeSlotStart,
+        Date: standardInterval.Date
       };
     });
 

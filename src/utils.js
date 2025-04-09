@@ -115,6 +115,32 @@ function convertTimezone(date, fromTZ, toTZ) {
   return new Date(date.getTime() + offsetDiff);
 }
 
+/**
+ * Creates a standardized time interval object that's aligned to consistent time boundaries
+ * @param {Date} datetime - The original datetime to floor
+ * @param {Number} intervalMinutes - Size of time interval in minutes
+ * @param {String} dateStr - Optional ISO date string (YYYY-MM-DD), will be extracted from datetime if not provided
+ * @return {Object} - Standardized interval object with TimeSlotStart and TimeSlotEnd
+ */
+function createStandardInterval(datetime, intervalMinutes = 15, dateStr = null) {
+  if (!datetime || !(datetime instanceof Date)) {
+    return null;
+  }
+  
+  // Floor the time to the interval boundary
+  const slotStart = floorToInterval(datetime, intervalMinutes);
+  const slotEnd = addMinutes(slotStart, intervalMinutes);
+  
+  // Use provided dateStr or extract from the datetime
+  const date = dateStr || slotStart.toISOString().split('T')[0];
+  
+  return {
+    Date: date,
+    TimeSlotStart: slotStart,
+    TimeSlotEnd: slotEnd
+  };
+}
+
 module.exports = {
   parseDateTime,
   formatDateTime,
@@ -122,5 +148,6 @@ module.exports = {
   floorToInterval,
   addMinutes,
   convertCentralToEastern,
-  convertTimezone
+  convertTimezone,
+  createStandardInterval
 };
