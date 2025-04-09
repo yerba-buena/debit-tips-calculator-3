@@ -129,7 +129,9 @@ function expandToIntervals(cleanedClock, intervalMinutes = 15) {
     
     // Continue generating intervals as long as slotStart is before the clock-out time
     while (slotStart < row.TimeOut) {
-      let standardInterval = createStandardInterval(slotStart, intervalMinutes, row.Date);
+      // Don't pass row.Date - let createStandardInterval extract the date from slotStart
+      // This ensures intervals after midnight have the correct date
+      let standardInterval = createStandardInterval(slotStart, intervalMinutes);
       intervals.push({
         Employee: row.Employee,
         Department: row.Department,
