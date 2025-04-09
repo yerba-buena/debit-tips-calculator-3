@@ -126,12 +126,17 @@ function expandToIntervals(cleanedClock, intervalMinutes = 15) {
     // Floor the timeIn to the standard interval boundary
     let standardInterval = createStandardInterval(row.TimeIn, intervalMinutes, row.Date);
     let slotStart = standardInterval.TimeSlotStart;
-    
-    // Continue generating intervals as long as slotStart is before the clock-out time
-    while (slotStart < row.TimeOut) {
+
+    // Continue generating intervals as long as slotStart is before or equal to the clock-out time
+    while (slotStart <= row.TimeOut) {
       // Don't pass row.Date - let createStandardInterval extract the date from slotStart
-      // This ensures intervals after midnight have the correct date
       let standardInterval = createStandardInterval(slotStart, intervalMinutes);
+      
+      // Log partial presence for transparency
+      // if (slotStart < row.TimeOut && row.TimeOut < standardInterval.TimeSlotEnd) {
+      //   console.log(`Partial presence: Employee ${row.Employee} credited for interval ending at ${standardInterval.TimeSlotEnd.toISOString()} despite clocking out at ${row.TimeOut.toISOString()}`);
+      // }
+
       intervals.push({
         Employee: row.Employee,
         Department: row.Department,
@@ -139,9 +144,11 @@ function expandToIntervals(cleanedClock, intervalMinutes = 15) {
         TimeSlotStart: standardInterval.TimeSlotStart,
         TimeSlotEnd: standardInterval.TimeSlotEnd
       });
+
       slotStart = standardInterval.TimeSlotEnd;
     }
   });
+
   return intervals;
 }
 
