@@ -4,7 +4,7 @@ const minimist = require('minimist');
 const path = require('path');
 const fs = require('fs');
 const { loadClockData, processClockData, expandToIntervals } = require('./clockData');
-const { loadTransactions, processTransactions } = require('./transactions');
+const { loadTransactions, processTransactions, printTipsByDay } = require('./transactions');
 const {
   countStaffPerSlot,
   computeTipPools,
@@ -140,6 +140,9 @@ async function main() {
   } else {
     console.log(`  Note: Transaction times converted from ${fromTimezone} to ${toTimezone} (default)`);
   }
+  
+  // Add this call to print tips by day and save to CSV
+  printTipsByDay(tipsBySlot, path.join(outputDir, 'tips_by_day.csv'));
   
   await writeCSV(path.join(outputDir, 'step3_tips_by_slot.csv'),
     [

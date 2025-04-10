@@ -62,8 +62,64 @@ function processTransactions(transactions, intervalMinutes = 15, convertTz = tru
   return Object.values(slotMap);
 }
 
+/**
+ * Print total tips grouped by day and optionally save to CSV
+ * @param {Array} transactions - Array of processed transaction records
+ * @param {String} csvFilePath - Optional path to save the data as CSV
+ * @return {Object} - Tips by day data
+ */
+function printTipsByDay(transactions, csvFilePath = null) {
+  const tipsByDay = transactions.reduce((acc, txn) => {
+    if (!acc[txn.Date]) {
+      acc[txn.Date] = 0;
+    }
+    acc[txn.Date] += txn.AmtTip;
+    return acc;
+  }, {});
+
+  console.log("Tips by Day:");
+  
+  // Create an array of objects for easier handling
+  const tipsData = Object.keys(tipsByDay).sort().map(date => {
+    const dayOfWeek = new Date(date).toLocaleDateString('en-US', { weekday: 'long' });
+    const tipAmount = tipsByDay[date];
+    console.log(`  ${date} (${dayOfWeek}): $${tipAmount.toFixed(2)}`);
+    
+    return {
+      Date: date,
+      DayOfWeek: dayOfWeek,
+      TipAmount: tipAmount.toFixed(2)
+    };
+  });
+  
+  // Save to CSV if a file path is provided
+  if (csvFilePath) {
+    saveTipsByDayToCSV(tipsData, csvFilePath);
+  }
+  
+  return tipsData;
+}
+
+/**
+ * Save tips by day data to a CSV file
+ * @param {Array} tipsData - Array of objects with Date, DayOfWeek, and TipAmount
+ * @param {String} filePath - Path to save the CSV file
+ */
+function saveTipsByDayToCSV(tipsData, filePath) {
+  const header = 'Date,DayOfWeek,TipAmount\n';
+  const rows = tipsData.map(row => 
+    `${row.Date},${row.DayOfWeek},$${row.TipAmount}`
+  ).join('\n');
+  
+  const csvContent = header + rows;
+  fs.writeFileSync(filePath, csvContent);
+  console.log(`Tips by day data saved to ${filePath}`);
+}
+
 module.exports = {
   loadTransactions,
   processTransactions,
-  readCSV
+  readCSV,
+  printTipsByDay,
+  saveTipsByDayToCSV
 };
