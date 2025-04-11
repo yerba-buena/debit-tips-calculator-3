@@ -8,31 +8,25 @@ const {
 } = require('../src/transactions');
 const utils = require('../src/utils');
 
-// Mock modules properly
-jest.mock('fs', () => ({
-  createReadStream: jest.fn(),
-  writeFileSync: jest.fn()
-}));
+// Mock functions individually with jest.spyOn
+jest.mock('fs');
+jest.mock('csv-parser');
+jest.mock('../src/utils');
 
-jest.mock('csv-parser', () => jest.fn(() => {
-  const { Transform } = require('stream');
-  const parser = new Transform({
-    objectMode: true,
-    transform(chunk, encoding, callback) {
-      callback(null, chunk);
-    }
-  });
-  return parser;
-}));
-
-jest.mock('../src/utils', () => ({
-  floorToInterval: jest.fn(),
-  convertTimezone: jest.fn(date => date),
-  createStandardInterval: jest.fn((date, interval) => ({
+// Set up mock implementations before tests run
+beforeAll(() => {
+  // Mock fs functions
+  fs.createReadStream = jest.fn();
+  fs.writeFileSync = jest.fn();
+  
+  // Mock utils functions
+  utils.convertTimezone = jest.fn(date => date);
+  utils.createStandardInterval = jest.fn((date, interval) => ({
     TimeSlotStart: new Date(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours(), 0, 0),
     Date: date.toISOString().split('T')[0]
-  }))
-}));
+  }));
+  utils.floorToInterval = jest.fn();
+});
 
 describe('readCSV', () => {
   beforeEach(() => {
@@ -192,7 +186,9 @@ describe('loadTransactions', () => {
 describe('processTransactions', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    utils.convertTimezone.mockImplementation((date) => date);
+    
+    // Re-establish the mock implementations for each test
+    utils.convertTimezone.mockImplementation(date => date);
     utils.createStandardInterval.mockImplementation((date, interval) => ({
       TimeSlotStart: new Date(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours(), 0, 0),
       Date: date.toISOString().split('T')[0]
@@ -302,6 +298,19 @@ describe('saveTipsByDayToCSV', () => {
     jest.spyOn(console, 'log').mockImplementation(() => {});
   });
 
+  test('should save tips data to CSV', () => {
+    const mockTipsData = [
+      { Date: '2023-01-01', DayOfWeek: 'Sunday', TipAmount: '8.50' },
+      { Date: '2023-01-02', DayOfWeek: 'Monday', TipAmount: '2.00' }
+    ];
+    
+    saveTipsByDayToCSV(mockTipsData, 'output.csv');
+    
+    const expectedCsvContent = 'Date,DayOfWeek,TipAmount\n2023-01-01,Sunday,$8.50\n2023-01-02,Monday,$2.00';
+    expect(fs.writeFileSync).toHaveBeenCalledWith('output.csv', expectedCsvContent);
+    expect(console.log).toHaveBeenCalledWith('Tips by day data saved to output.csv');
+  });
+  
   test('should handle quotes in field values', () => {
     const mockTipsData = [
       { Date: '2023-01-01', DayOfWeek: 'Sunday "Busy Day"', TipAmount: '8.50' }
@@ -343,7 +352,9 @@ describe('saveTipsByDayToCSV', () => {
 describe('Integrated functionality', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    utils.convertTimezone.mockImplementation((date) => date);
+    
+    // Re-establish the mock implementations for each test
+    utils.convertTimezone.mockImplementation(date => date);
     utils.createStandardInterval.mockImplementation((date, interval) => ({
       TimeSlotStart: new Date(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours(), 0, 0),
       Date: date.toISOString().split('T')[0]
@@ -357,21 +368,20 @@ describe('Integrated functionality', () => {
       { TransDateTime: '2023-01-01T12:30:00', AmtTip: '3.50', Approved: 'Yes' }
     ];
     
-    jest.spyOn(fs, 'createReadStream').mockImplementation(() => {
-      const mockStream = {
-        pipe: jest.fn().mockReturnThis(),
-        on: jest.fn().mockImplementation(function(event, callback) {
-          if (event === 'data') {
-            mockTransactions.forEach(callback);
-          }
-          if (event === 'end') {
-            callback();
-          }
-          return this;
-        })
-      };
-      return mockStream;
-    });
+    const mockStream = {
+      pipe: jest.fn().mockReturnThis(),
+      on: jest.fn().mockImplementation(function(event, callback) {
+        if (event === 'data') {
+          mockTransactions.forEach(callback);
+        }
+        if (event === 'end') {
+          callback();
+        }
+        return this;
+      })
+    };
+    
+    fs.createReadStream.mockReturnValue(mockStream);
     
     // Full workflow
     const transactions = await loadTransactions('test.csv');
@@ -396,21 +406,20 @@ describe('Integrated functionality', () => {
       { TransDateTime: '2023-01-01T12:00:00', AmtTip: '5.00', Approved: 'Yes' } // One valid record
     ];
     
-    jest.spyOn(fs, 'createReadStream').mockImplementation(() => {
-      const mockStream = {
-        pipe: jest.fn().mockReturnThis(),
-        on: jest.fn().mockImplementation(function(event, callback) {
-          if (event === 'data') {
-            mockTransactions.forEach(callback);
-          }
-          if (event === 'end') {
-            callback();
-          }
-          return this;
-        })
-      };
-      return mockStream;
-    });
+    const mockStream = {
+      pipe: jest.fn().mockReturnThis(),
+      on: jest.fn().mockImplementation(function(event, callback) {
+        if (event === 'data') {
+          mockTransactions.forEach(callback);
+        }
+        if (event === 'end') {
+          callback();
+        }
+        return this;
+      })
+    };
+    
+    fs.createReadStream.mockReturnValue(mockStream);
     
     // Process the data
     const transactions = await loadTransactions('test.csv');
