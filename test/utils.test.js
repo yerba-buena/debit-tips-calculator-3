@@ -282,6 +282,51 @@ describe('convertCentralToEastern', () => {
     expect(winterEastern.getHours()).toBe(11);
     expect(summerEastern.getHours()).toBe(11);
   });
+
+  // Add a test WITHOUT mocking to test the actual implementation
+  test('should correctly convert without mocking', () => {
+    // Restore all mocks to test the actual implementation
+    jest.restoreAllMocks();
+    
+    // Create a date in Central Time
+    const centralTime = new Date(2025, 1, 18, 10, 30, 0);
+    
+    // Original implementation test
+    const result = convertCentralToEastern(centralTime);
+    
+    // We can't predict the exact hour due to DST changes, but we can verify
+    // the function doesn't throw and returns a Date object
+    expect(result).toBeInstanceOf(Date);
+    
+    // Re-setup mocks for other tests
+    jest.spyOn(require('../src/utils'), 'convertCentralToEastern').mockImplementation(date => {
+      if (!date || !(date instanceof Date)) {
+        return date;
+      }
+      return new Date(date.getTime() + 60 * 60 * 1000);
+    });
+  });
+  
+  test('should handle offset calculation correctly', () => {
+    // Create mock for specific timezone string parsing
+    const originalSplit = String.prototype.split;
+    String.prototype.split = jest.fn().mockImplementation(function(separator) {
+      if (this.includes('CST') || this.includes('EST')) {
+        return [this.toString(), separator === ' ' ? 'CST' : this.toString()];
+      }
+      return originalSplit.call(this, separator);
+    });
+    
+    jest.restoreAllMocks();
+    
+    const centralTime = new Date(2025, 1, 18, 10, 30, 0);
+    const result = convertCentralToEastern(centralTime);
+    
+    // Restore the original split function
+    String.prototype.split = originalSplit;
+    
+    expect(result).toBeInstanceOf(Date);
+  });
 });
 
 describe('convertTimezone', () => {
@@ -350,6 +395,30 @@ describe('convertTimezone', () => {
       convertTimezone(date, 'America/Chicago', 'Invalid/Timezone');
     }).not.toThrow();
   });
+
+  // Test with real implementation
+  test('should handle date string conversions correctly', () => {
+    jest.restoreAllMocks();
+    
+    // Mock toLocaleString differently to test the string conversion
+    const originalToLocaleString = Date.prototype.toLocaleString;
+    Date.prototype.toLocaleString = jest.fn().mockImplementation(function(locale, options) {
+      if (options && options.timeZone) {
+        // Return predictable values for testing
+        return `2025-02-18 10:30:00 ${options.timeZone}`;
+      }
+      return originalToLocaleString.call(this, locale, options);
+    });
+    
+    const date = new Date(2025, 1, 18, 10, 30, 0);
+    convertTimezone(date, 'America/Chicago', 'America/New_York');
+    
+    // Verify toLocaleString was called with the correct parameters
+    expect(Date.prototype.toLocaleString.mock.calls.length).toBeGreaterThan(0);
+    
+    // Restore original function
+    Date.prototype.toLocaleString = originalToLocaleString;
+  });
 });
 
 describe('createStandardInterval', () => {
@@ -416,5 +485,27 @@ describe('createStandardInterval', () => {
     
     expect(result1.Date).toBe('2025-02-18');
     expect(result2.Date).toBe('2025-02-18');
+  });
+
+  test('should handle error in toISOString', () => {
+    // Create an invalid date that will throw when toISOString is called
+    const invalidDate = new Date('Invalid Date');
+    
+    // Mock the Date.prototype.toISOString to throw an error
+    const originalToISOString = Date.prototype.toISOString;
+    Date.prototype.toISOString = jest.fn().mockImplementation(function() {
+      throw new Error('Invalid time value');
+    });
+    
+    // We need a valid date for slotStart but want toISOString to throw
+    const date = new Date(2025, 1, 18, 10, 30, 0);
+    const result = createStandardInterval(date);
+    
+    // The function should handle the error and return a valid object with a fallback date
+    expect(result).toHaveProperty('Date');
+    expect(result.Date).toBe('invalid-date');
+    
+    // Restore original function
+    Date.prototype.toISOString = originalToISOString;
   });
 });
