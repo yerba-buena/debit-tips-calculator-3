@@ -23,6 +23,11 @@ const formatDateTime = (dt) => {
 };
 
 const floorToInterval = (dt, intervalMinutes = 15) => {
+  // Ensure intervalMinutes is a positive number, default to 15 if not
+  intervalMinutes = typeof intervalMinutes === 'number' && intervalMinutes > 0 
+    ? intervalMinutes 
+    : 15;
+    
   const minutes = dt.getMinutes();
   const remainder = minutes % intervalMinutes;
   return new Date(dt.getTime() - remainder * 60000 - dt.getSeconds() * 1000 - dt.getMilliseconds());
@@ -123,7 +128,7 @@ function convertTimezone(date, fromTZ, toTZ) {
  * @return {Object} - Standardized interval object with TimeSlotStart and TimeSlotEnd
  */
 function createStandardInterval(datetime, intervalMinutes = 15, dateStr = null) {
-  if (!datetime || !(datetime instanceof Date)) {
+  if (!datetime || !(datetime instanceof Date) || isNaN(datetime.getTime())) {
     return null;
   }
   
@@ -132,7 +137,13 @@ function createStandardInterval(datetime, intervalMinutes = 15, dateStr = null) 
   const slotEnd = addMinutes(slotStart, intervalMinutes);
   
   // Use provided dateStr or extract from the datetime
-  const date = dateStr || slotStart.toISOString().split('T')[0];
+  let date;
+  try {
+    date = dateStr || slotStart.toISOString().split('T')[0];
+  } catch (error) {
+    // If there's any issue with the date, use a fallback format
+    date = dateStr || 'invalid-date';
+  }
   
   return {
     Date: date,
