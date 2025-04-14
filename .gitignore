@@ -14,3 +14,4 @@ input-data/clock-times.csv
 input-data/transactions.csv
 output/*
 /coverage
+output.csv
