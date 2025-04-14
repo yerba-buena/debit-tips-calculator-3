@@ -509,3 +509,69 @@ describe('createStandardInterval', () => {
     Date.prototype.toISOString = originalToISOString;
   });
 });
+
+const { expect } = require('chai');
+const {
+  formatDateTime,
+  parseDateTime,
+  addMinutes,
+  createStandardInterval
+} = require('../src/utils');
+
+describe('Utils', () => {
+  describe('formatDateTime', () => {
+    it('should format date objects to readable strings', () => {
+      expect.fail('Test not implemented');
+    });
+
+    it('should handle null or undefined inputs', () => {
+      expect.fail('Test not implemented');
+    });
+  });
+
+  describe('parseDateTime', () => {
+    it('should parse date and time strings into a Date object', () => {
+      expect.fail('Test not implemented');
+    });
+
+    it('should handle different date and time formats', () => {
+      expect.fail('Test not implemented');
+    });
+
+    it('should handle invalid inputs', () => {
+      expect.fail('Test not implemented');
+    });
+  });
+
+  describe('addMinutes', () => {
+    it('should add the specified minutes to a date', () => {
+      expect.fail('Test not implemented');
+    });
+
+    it('should handle crossing day boundaries', () => {
+      expect.fail('Test not implemented');
+    });
+
+    it('should handle negative minutes', () => {
+      expect.fail('Test not implemented');
+    });
+  });
+
+  describe('createStandardInterval', () => {
+    it('should create a standard interval with correct start and end times', () => {
+      expect.fail('Test not implemented');
+    });
+
+    it('should floor timestamps to the specified interval boundaries', () => {
+      expect.fail('Test not implemented');
+    });
+
+    it('should extract the date from the timestamp if not provided', () => {
+      expect.fail('Test not implemented');
+    });
+
+    it('should handle various interval durations', () => {
+      expect.fail('Test not implemented');
+    });
+  });
+});

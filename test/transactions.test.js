@@ -7,6 +7,8 @@ const {
   saveTipsByDayToCSV 
 } = require('../src/transactions');
 const utils = require('../src/utils');
+const { expect } = require('chai');
+const sinon = require('sinon');
 
 // Mock functions individually with jest.spyOn
 jest.mock('fs');
@@ -478,5 +480,67 @@ describe('Integrated functionality', () => {
       // just verify we got the expected error type
       expect(error.message).toContain('Invalid time value');
     }
+  });
+});
+
+describe('Transactions', () => {
+  describe('loadTransactions', () => {
+    it('should load and parse transaction data from CSV', () => {
+      expect.fail('Test not implemented');
+    });
+
+    it('should handle empty files', () => {
+      expect.fail('Test not implemented');
+    });
+
+    it('should reject with an error for file not found', () => {
+      expect.fail('Test not implemented');
+    });
+  });
+
+  describe('processTransactions', () => {
+    it('should aggregate tips by time slot', () => {
+      expect.fail('Test not implemented');
+    });
+
+    it('should apply timezone conversion when specified', () => {
+      expect.fail('Test not implemented');
+    });
+
+    it('should not apply timezone conversion when disabled', () => {
+      expect.fail('Test not implemented');
+    });
+
+    it('should respect the specified interval duration', () => {
+      expect.fail('Test not implemented');
+    });
+
+    it('should handle transactions with no tips', () => {
+      expect.fail('Test not implemented');
+    });
+  });
+
+  describe('printTipsByDay', () => {
+    let consoleLogStub;
+    
+    beforeEach(() => {
+      consoleLogStub = sinon.stub(console, 'log');
+    });
+    
+    afterEach(() => {
+      consoleLogStub.restore();
+    });
+    
+    it('should print tips by day to console', () => {
+      expect.fail('Test not implemented');
+    });
+
+    it('should save tips by day to CSV if output path provided', () => {
+      expect.fail('Test not implemented');
+    });
+
+    it('should handle empty tip data', () => {
+      expect.fail('Test not implemented');
+    });
   });
 });
