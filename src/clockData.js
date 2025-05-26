@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const csvParser = require('csv-parser');
-const { parseDateTime, addMinutes } = require('./utils');
+const { parseDateTime, addMinutes, createStandardInterval } = require('./utils');
 const { Readable } = require('stream');
 
 // Reads CSV file without any pre-processing (not used for clock data)
@@ -50,10 +50,23 @@ async function loadClockData(filePath) {
  * clock-out times using 'Total Less Break' (assumed to be hours).
  */
 function processClockData(clockData) {
-  return clockData.map(row => {
+  // Debug: Count entries with missing clock-out times
+  const missedClockouts = clockData.filter(row => 
+    row['Time Out'] === '-' || row['Date Out'] === 'Missed Clockout');
+  
+  if (missedClockouts.length > 0) {
+    console.log(`Found ${missedClockouts.length} missed clockouts.`);
+    // Log a few examples
+    missedClockouts.slice(0, 3).forEach(entry => {
+      console.log(`  Employee: ${entry['First Name']} ${entry['Last Name']}, Date: ${entry['Date In']}, Time In: ${entry['Time In']}, Time Out: ${entry['Time Out']}`);
+      console.log(`  Total Less Break: ${entry['Total Less Break']} (using for timeOut calculation)`);
+    });
+  }
+  
+  const processed = clockData.map(row => {
     const employee = `${row['First Name']} ${row['Last Name']}`;
     const timeIn = parseDateTime(row['Date In'], row['Time In']);
-    let timeOut = row['Time Out'] ? parseDateTime(row['Date Out'], row['Time Out']) : null;
+    let timeOut = row['Time Out'] && row['Time Out'] !== '-' ? parseDateTime(row['Date Out'], row['Time Out']) : null;
     if (!timeOut && row['Total Less Break']) {
       const hours = parseFloat(row['Total Less Break']);
       timeOut = addMinutes(timeIn, hours * 60);
@@ -67,6 +80,14 @@ function processClockData(clockData) {
       TimeOut: timeOut
     };
   });
+  
+  // Check for any entries with missing timeOut after processing
+  const missingTimeOuts = processed.filter(row => !row.TimeOut);
+  if (missingTimeOuts.length > 0) {
+    console.error(`WARNING: ${missingTimeOuts.length} entries still have missing TimeOut values after processing`);
+  }
+  
+  return processed;
 }
 
 /**
@@ -77,8 +98,16 @@ function processClockData(clockData) {
  *
  * The interval must be between 2 and 60 minutes and evenly divide 1440.
  * If invalid, defaults to 15 minutes.
+ * 
+ * Note: Intervals are floored to standard time boundaries (like :00, :15, etc.)
+ * to ensure alignment with transaction data.
  */
 function expandToIntervals(cleanedClock, intervalMinutes = 15) {
+  // Add date range logging to understand the scope of clock data
+  const dates = new Set(cleanedClock.map(entry => entry.Date));
+  const sortedDates = Array.from(dates).sort();
+  console.log(`Clock data covers ${dates.size} unique dates from ${sortedDates[0]} to ${sortedDates[sortedDates.length-1]}`);
+  
   // Validate the intervalMinutes parameter
   if (
     typeof intervalMinutes !== 'number' ||
@@ -94,22 +123,32 @@ function expandToIntervals(cleanedClock, intervalMinutes = 15) {
   
   let intervals = [];
   cleanedClock.forEach(row => {
-    let slotStart = new Date(row.TimeIn);
-    // Continue generating intervals as long as slotStart is before the clock-out time.
-    // Even if the employee clocks out in the middle of an interval,
-    // we include that entire block.
-    while (slotStart < row.TimeOut) {
-      let slotEnd = addMinutes(slotStart, intervalMinutes);
+    // Floor the timeIn to the standard interval boundary
+    let standardInterval = createStandardInterval(row.TimeIn, intervalMinutes, row.Date);
+    let slotStart = standardInterval.TimeSlotStart;
+
+    // Continue generating intervals as long as slotStart is before or equal to the clock-out time
+    while (slotStart <= row.TimeOut) {
+      // Don't pass row.Date - let createStandardInterval extract the date from slotStart
+      let standardInterval = createStandardInterval(slotStart, intervalMinutes);
+      
+      // Log partial presence for transparency
+      // if (slotStart < row.TimeOut && row.TimeOut < standardInterval.TimeSlotEnd) {
+      //   console.log(`Partial presence: Employee ${row.Employee} credited for interval ending at ${standardInterval.TimeSlotEnd.toISOString()} despite clocking out at ${row.TimeOut.toISOString()}`);
+      // }
+
       intervals.push({
         Employee: row.Employee,
         Department: row.Department,
-        Date: row.Date,
-        TimeSlotStart: new Date(slotStart),
-        TimeSlotEnd: new Date(slotEnd)
+        Date: standardInterval.Date,
+        TimeSlotStart: standardInterval.TimeSlotStart,
+        TimeSlotEnd: standardInterval.TimeSlotEnd
       });
-      slotStart = slotEnd;
+
+      slotStart = standardInterval.TimeSlotEnd;
     }
   });
+
   return intervals;
 }
 
